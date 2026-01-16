@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "crates/auvura-core",
+    "crates/auvura-proxy",
+    "crates/auvura-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Riccione <email@auvura.io>"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Auvura/auvura"
+
+[workspace.dependencies]
+# Web & Proxy
+axum = "0.8.8"
+tokio = { version = "1.49.0", features = ["full"] }
+tower-http = { version = "0.6.8", features = ["full"] }
+reqwest = { version = "0.13.1", features = ["json", "stream"] }
+
+# Data & ML
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

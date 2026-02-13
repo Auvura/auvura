@@ -73,6 +73,16 @@ impl RedactionPolicy {
     pub fn requires_validation(&self) -> bool {
         self.strict_validation
     }
+
+    /// Get allowlist terms (for span detection in redactor)
+    pub fn allowlist_terms(&self) -> &[String] {
+        &self.allowlist
+    }
+
+    /// Get blocklist terms (for exact-match redaction)
+    pub fn blocklist_terms(&self) -> &[String] {
+        &self.blocklist
+    }
 }
 
 /// Builder for RedactionPolicy – enables fluent configuration

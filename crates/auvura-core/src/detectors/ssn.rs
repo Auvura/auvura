@@ -234,7 +234,7 @@ mod tests {
     fn test_zeroizes_on_drop() {
         let detector = SSNDetector::new();
         let text = "123-45-6789";
-        let mut detections = detector.detect(text);
+        let detections = detector.detect(text);
         
         assert_eq!(detections.len(), 1);
         let original = detections[0].original.clone();

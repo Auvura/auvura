@@ -1,5 +1,5 @@
 /// PII types with deterministic detection and regulatory grounding.
-/// 
+///
 /// Design principles:
 /// - Only types with regex + validation (minimal false negatives)
 /// - Excludes contextual PII (names/addresses) requiring NER
@@ -9,7 +9,7 @@
 pub enum PiiType {
     Email,
     PhoneNumber,
-    Ssn,           // US Social Security Number
+    Ssn, // US Social Security Number
     CreditCard,
     IpAddressV4,
     IpAddressV6,
@@ -69,7 +69,10 @@ mod tests {
         ];
         let placeholders: Vec<_> = types.iter().map(|t| t.placeholder()).collect();
         let unique: std::collections::HashSet<_> = placeholders.iter().collect();
-        assert_eq!(placeholders.len(), unique.len(),
-            "Placeholders must be unique for grep-able audit logs");
+        assert_eq!(
+            placeholders.len(),
+            unique.len(),
+            "Placeholders must be unique for grep-able audit logs"
+        );
     }
 }

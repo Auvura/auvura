@@ -44,17 +44,17 @@ impl SSNDetector {
         if area == 0 || area == 666 || area >= 900 {
             return false;
         }
-        
+
         // Invalid group number
         if group == 0 {
             return false;
         }
-        
+
         // Invalid serial number
         if serial == 0 {
             return false;
         }
-        
+
         true
     }
 
@@ -112,7 +112,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "SSN: 123-45-6789";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].pii_type, PiiType::Ssn);
         assert_eq!(detections[0].start, 5);
@@ -125,7 +125,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "ID: 123456789";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "123456789");
     }
@@ -135,7 +135,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Invalid: 000-12-3456";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -144,7 +144,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Invalid: 666-12-3456";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -153,7 +153,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Invalid: 900-12-3456 and 999-99-9999";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -162,7 +162,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Invalid: 123-00-4567";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -171,7 +171,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Invalid: 123-45-0000";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -180,7 +180,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Not SSN: 1234-56-7890";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -189,7 +189,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Not SSN: 1234567890";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -198,7 +198,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "SSNs: 123-45-6789 and 567890123";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 2);
         assert_eq!(detections[0].original, "123-45-6789");
         assert_eq!(detections[1].original, "567890123");
@@ -209,7 +209,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Second: 456-78-9012 First: 123-45-6789";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 2);
         assert!(detections[0].start < detections[1].start);
         assert_eq!(detections[0].original, "456-78-9012");
@@ -219,14 +219,14 @@ mod tests {
     #[test]
     fn test_integrates_with_redactor() {
         use crate::{policy::RedactionPolicy, redactor::Redactor};
-        
+
         let detector = SSNDetector::new();
         let policy = RedactionPolicy::default();
         let redactor = Redactor::new(vec![Box::new(detector)], policy);
-        
+
         let input = "My SSN is 123-45-6789";
         let result = redactor.redact(input);
-        
+
         assert_eq!(result, "My SSN is ███-██-████");
     }
 
@@ -235,11 +235,11 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "123-45-6789";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         let original = detections[0].original.clone();
         assert_eq!(original, "123-45-6789");
-        
+
         std::mem::drop(detections);
     }
 
@@ -248,7 +248,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Valid: 899-12-3456";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "899-12-3456");
     }
@@ -258,7 +258,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Valid: 123-99-4567";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "123-99-4567");
     }
@@ -268,7 +268,7 @@ mod tests {
         let detector = SSNDetector::new();
         let text = "Valid: 123-45-9999";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "123-45-9999");
     }

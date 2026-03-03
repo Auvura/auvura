@@ -1,8 +1,8 @@
-pub mod types;
 pub mod detector;
+pub mod detectors;
 pub mod policy;
 pub mod redactor;
-pub mod detectors;
+pub mod types;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

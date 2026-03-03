@@ -6,16 +6,16 @@ use std::collections::{HashMap, HashSet};
 pub struct RedactionPolicy {
     /// Enabled PII types (default: all high-confidence types)
     enabled_types: HashSet<PiiType>,
-    
+
     /// Custom placeholder per PII type (overrides defaults)
     placeholder_map: HashMap<PiiType, String>,
-    
+
     /// Allowlist: terms NEVER redacted (e.g., "Apple", "Paris")
     allowlist: Vec<String>,
-    
+
     /// Blocklist: terms ALWAYS redacted (e.g., known employee names)
     blocklist: Vec<String>,
-    
+
     /// Require validation for types that support it (e.g., Luhn check)
     strict_validation: bool,
 }
@@ -103,7 +103,9 @@ impl PolicyBuilder {
     }
 
     pub fn with_placeholder(mut self, pii_type: PiiType, placeholder: &str) -> Self {
-        self.policy.placeholder_map.insert(pii_type, placeholder.to_string());
+        self.policy
+            .placeholder_map
+            .insert(pii_type, placeholder.to_string());
         self
     }
 
@@ -176,7 +178,7 @@ mod tests {
         let policy = PolicyBuilder::default()
             .with_placeholder(PiiType::Email, "█".repeat(10).as_str())
             .build();
-        
+
         assert_eq!(policy.placeholder_for(PiiType::Email), "██████████");
         assert_eq!(policy.placeholder_for(PiiType::Ssn), "[REDACTED_SSN]"); // unchanged
     }
@@ -186,7 +188,7 @@ mod tests {
         let policy = PolicyBuilder::default()
             .with_allowlist(vec!["Apple Inc", "Paris"])
             .build();
-        
+
         assert!(policy.is_allowed("Contact Apple Inc support"));
         assert!(!policy.is_allowed("Contact John Doe")); // not in allowlist
     }

@@ -32,9 +32,8 @@ impl EmailDetector {
         PATTERN.get_or_init(|| {
             // RFC 5322 simplified pattern with word boundary enforcement
             // Supports: user@domain.tld, "quoted"@domain.com, sub.domain@mail.co.uk
-            Regex::new(
-                r#"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b"#
-            ).expect("Email regex pattern is valid")
+            Regex::new(r#"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b"#)
+                .expect("Email regex pattern is valid")
         })
     }
 }
@@ -67,7 +66,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Contact john.doe@example.com for support";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].pii_type, PiiType::Email);
         assert_eq!(detections[0].start, 8);
@@ -80,7 +79,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Email alice@example.com and bob@test.org";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 2);
         assert_eq!(detections[0].original, "alice@example.com");
         assert_eq!(detections[1].original, "bob@test.org");
@@ -91,7 +90,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Send to user@mail.example.co.uk";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "user@mail.example.co.uk");
     }
@@ -101,7 +100,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Contact example.com for help";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 0);
     }
 
@@ -110,7 +109,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Email user@localhost";
         let detections = detector.detect(text);
-        
+
         // "localhost" without dot is not matched by our pattern
         assert_eq!(detections.len(), 0);
     }
@@ -120,7 +119,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Visit user@example.com. for details";
         let detections = detector.detect(text);
-        
+
         // Should NOT include trailing dot in match
         assert_eq!(detections.len(), 1);
         // Should NOT include trailing punctuation in match
@@ -141,7 +140,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Please reach out to support@company.com or sales@company.com.";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 2);
         assert_eq!(detections[0].original, "support@company.com");
         assert_eq!(detections[1].original, "sales@company.com");
@@ -152,7 +151,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Contact JOHN.DOE@EXAMPLE.COM";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         // Original case preserved in Detection
         assert_eq!(detections[0].original, "JOHN.DOE@EXAMPLE.COM");
@@ -163,7 +162,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Email bob@test.org and alice@example.com";
         let detections = detector.detect(text);
-        
+
         // Detections must be sorted by start offset
         assert!(detections[0].start < detections[1].start);
         assert_eq!(detections[0].original, "bob@test.org");
@@ -173,14 +172,14 @@ mod tests {
     #[test]
     fn test_integrates_with_redactor() {
         use crate::{policy::RedactionPolicy, redactor::Redactor};
-        
+
         let detector = EmailDetector::new();
         let policy = RedactionPolicy::default();
         let redactor = Redactor::new(vec![Box::new(detector)], policy);
-        
+
         let input = "Contact john.doe@example.com for support";
         let result = redactor.redact(input);
-        
+
         // Should redact with structured opaque format
         assert_eq!(result, "Contact ████.███@███████.com for support");
     }
@@ -190,11 +189,11 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "user@example.com";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         let original = detections[0].original.clone();
         assert_eq!(original, "user@example.com");
-        
+
         // Drop will zeroize via Detection::Drop
         std::mem::drop(detections);
         // Cannot verify in safe Rust, but Drop impl guarantees zeroization
@@ -205,7 +204,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Contact admin+filter@example.com";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "admin+filter@example.com");
     }
@@ -215,7 +214,7 @@ mod tests {
         let detector = EmailDetector::new();
         let text = "Support: 12345@company.com";
         let detections = detector.detect(text);
-        
+
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "12345@company.com");
     }

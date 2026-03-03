@@ -5,9 +5,9 @@ use zeroize::Zeroize;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detection {
     pub pii_type: PiiType,
-    pub start: usize,      // UTF-8 byte offset (NOT char index)
-    pub end: usize,        // UTF-8 byte offset
-    pub original: String,  // Original text – will be zeroized on drop
+    pub start: usize,     // UTF-8 byte offset (NOT char index)
+    pub end: usize,       // UTF-8 byte offset
+    pub original: String, // Original text – will be zeroized on drop
 }
 
 impl Zeroize for Detection {
@@ -83,8 +83,9 @@ impl MultiDetector {
         for i in 1..detections.len() {
             if detections[i].start < detections[current_idx].end {
                 // Overlap detected – keep the longer span (more specific pattern)
-                if detections[i].end - detections[i].start > 
-                    detections[current_idx].end - detections[current_idx].start {
+                if detections[i].end - detections[i].start
+                    > detections[current_idx].end - detections[current_idx].start
+                {
                     current_idx = i;
                 }
             } else {
@@ -104,7 +105,9 @@ mod tests {
     // Dummy detector for testing trait contract
     struct TestEmailDetector;
     impl PiiDetector for TestEmailDetector {
-        fn pii_type(&self) -> PiiType { PiiType::Email }
+        fn pii_type(&self) -> PiiType {
+            PiiType::Email
+        }
         fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
             if let Some(idx) = text.find('@') {
                 // Simplified for test – real detector uses proper regex

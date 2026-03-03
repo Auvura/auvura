@@ -43,10 +43,10 @@ impl CreditCardDetector {
         if s.len() < 2 {
             return false;
         }
-        
+
         let mut sum = 0;
         let mut should_double = false;
-        
+
         for ch in s.chars().rev() {
             if let Some(digit) = ch.to_digit(10) {
                 let mut d = digit;
@@ -62,23 +62,23 @@ impl CreditCardDetector {
                 return false;
             }
         }
-        
+
         sum % 10 == 0
     }
 
     /// BIN validation + length checks to prevent false positives
     fn is_valid_card_number(s: &str) -> bool {
         let len = s.len();
-        
+
         if len < 13 || len > 19 {
             return false;
         }
-        
+
         // Visa: starts with 4 (13 or 16 digits)
         if s.starts_with('4') && (len == 13 || len == 16) {
             return true;
         }
-        
+
         // Mastercard: 51-55 (16 digits) OR 2221-2720 (16 digits)
         if len == 16 {
             if s.starts_with('5') {
@@ -88,14 +88,23 @@ impl CreditCardDetector {
                     }
                 }
             }
-            if s.starts_with("222") || s.starts_with("223") || s.starts_with("224") ||
-               s.starts_with("225") || s.starts_with("226") || s.starts_with("227") ||
-               s.starts_with("228") || s.starts_with("229") || s.starts_with("23") ||
-               s.starts_with("24") || s.starts_with("25") || s.starts_with("26") ||
-               s.starts_with("27") {
+            if s.starts_with("222")
+                || s.starts_with("223")
+                || s.starts_with("224")
+                || s.starts_with("225")
+                || s.starts_with("226")
+                || s.starts_with("227")
+                || s.starts_with("228")
+                || s.starts_with("229")
+                || s.starts_with("23")
+                || s.starts_with("24")
+                || s.starts_with("25")
+                || s.starts_with("26")
+                || s.starts_with("27")
+            {
                 return true;
             }
-            
+
             // Discover: 6011, 65, 644-649
             if s.starts_with("6011") || s.starts_with("65") {
                 return true;
@@ -108,12 +117,12 @@ impl CreditCardDetector {
                 }
             }
         }
-        
+
         // Amex: 34 or 37 (15 digits)
         if len == 15 && (s.starts_with("34") || s.starts_with("37")) {
             return true;
         }
-        
+
         false
     }
 }
@@ -125,12 +134,12 @@ impl PiiDetector for CreditCardDetector {
 
     fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
         let mut detections = Vec::new();
-        
+
         for m in self.pattern.find_iter(text) {
             let candidate = m.as_str();
             let start = m.start();
             let end = m.end();
-            
+
             // CRITICAL: Boundary validation in Rust code (avoids regex look-around)
             // Reject if preceded by digit (prevents matching substrings of longer numbers)
             if start > 0 {
@@ -139,7 +148,7 @@ impl PiiDetector for CreditCardDetector {
                     continue;
                 }
             }
-            
+
             // Reject if followed by digit
             if end < text.len() {
                 let next_char = text[end..end + 1].chars().next().unwrap_or('\0');
@@ -147,18 +156,15 @@ impl PiiDetector for CreditCardDetector {
                     continue;
                 }
             }
-            
+
             // Clean separators to get raw digits
-            let cleaned: String = candidate
-                .chars()
-                .filter(|c| c.is_ascii_digit())
-                .collect();
-            
+            let cleaned: String = candidate.chars().filter(|c| c.is_ascii_digit()).collect();
+
             // Safety check (pattern should guarantee this, but validate anyway)
             if cleaned.len() < 13 || cleaned.len() > 19 {
                 continue;
             }
-            
+
             // Validation chain: Luhn + BIN patterns
             if Self::passes_luhn(&cleaned) && Self::is_valid_card_number(&cleaned) {
                 detections.push(Detection {
@@ -169,7 +175,7 @@ impl PiiDetector for CreditCardDetector {
                 });
             }
         }
-        
+
         // Sort by start position (required by trait contract)
         detections.sort_by_key(|d| d.start);
         detections

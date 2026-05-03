@@ -38,8 +38,14 @@ impl Redactor {
         // Step 2: Run detectors on ORIGINAL text (not modified by blocklist)
         let detections = self.detector.detect(text);
 
+        // Step 2b: Filter out detections for disabled PII types
+        let enabled_detections: Vec<Detection> = detections
+            .into_iter()
+            .filter(|d| self.policy.is_enabled(d.pii_type))
+            .collect();
+
         // Step 3: Filter detections - remove those overlapping with allowlist
-        let filtered_detections: Vec<Detection> = detections
+        let filtered_detections: Vec<Detection> = enabled_detections
             .into_iter()
             .filter(|d| {
                 !allowlist_spans
@@ -319,6 +325,35 @@ mod tests {
         // Both blocklist and PII should be redacted
         assert!(!result.contains("SPAM"));
         assert!(result.contains("@"));
+    }
+
+    #[test]
+    fn test_disabled_pii_type_not_redacted() {
+        // Test that disabling a PII type via policy actually works
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .disable(PiiType::Email)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        // Email should NOT be redacted since we disabled Email type
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_enabled_pii_type_is_redacted() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .enable(PiiType::Email)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        // Email should be redacted since Email type is enabled (explicitly)
+        assert!(result.contains("@███████.com"));
     }
 
     #[test]

@@ -79,13 +79,17 @@ impl PiiDetector for SSNDetector {
     }
 
     fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+        self.detect_with_validation(text, true)
+    }
+
+    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
         let mut detections = Vec::new();
 
         // Single pass with combined pattern prevents overlaps
         for m in self.combined_pattern.find_iter(text) {
             let ssn_str = m.as_str();
             if let Some((area, group, serial)) = self.parse_ssn(ssn_str) {
-                if self.is_valid_ssn(area, group, serial) {
+                if !validate || self.is_valid_ssn(area, group, serial) {
                     detections.push(Detection {
                         pii_type: PiiType::Ssn,
                         start: m.start(),

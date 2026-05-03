@@ -36,7 +36,10 @@ impl Redactor {
         let allowlist_spans = self.find_allowlist_spans(text);
 
         // Step 2: Run detectors on ORIGINAL text (not modified by blocklist)
-        let detections = self.detector.detect(text);
+        // Pass validation flag from policy
+        let detections = self
+            .detector
+            .detect_with_validation(text, self.policy.requires_validation());
 
         // Step 2b: Filter out detections for disabled PII types
         let enabled_detections: Vec<Detection> = detections
@@ -435,5 +438,87 @@ mod tests {
         let input = "Card: 4111 1111 1111 1111";
         let result = redactor.redact(input);
         assert_eq!(result, "Card: ████ ████ ████ 1111");
+    }
+
+    #[test]
+    fn test_strict_validation_skips_invalid_cards_when_enabled() {
+        // When strict_validation is true (default), invalid Luhn numbers should not be detected
+        struct TestCcDetector;
+        impl PiiDetector for TestCcDetector {
+            fn pii_type(&self) -> PiiType {
+                PiiType::CreditCard
+            }
+            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+                self.detect_with_validation(text, true)
+            }
+            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+                if let Some(start) = text.find("1234567890123456") {
+                    let candidate = "1234567890123456";
+                    if validate && !self.validate(candidate) {
+                        return vec![];
+                    }
+                    return vec![Detection {
+                        pii_type: PiiType::CreditCard,
+                        start,
+                        end: start + 16,
+                        original: candidate.to_string(),
+                    }];
+                }
+                vec![]
+            }
+            fn validate(&self, candidate: &str) -> bool {
+                // This invalid number should fail validation
+                candidate != "1234567890123456"
+            }
+        }
+
+        let policy = RedactionPolicy::default(); // strict_validation = true by default
+        let redactor = Redactor::new(vec![Box::new(TestCcDetector)], policy);
+
+        let input = "Card: 1234567890123456";
+        let result = redactor.redact(input);
+        // Should NOT redact since validation fails
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_strict_validation_allows_invalid_cards_when_disabled() {
+        struct TestCcDetector;
+        impl PiiDetector for TestCcDetector {
+            fn pii_type(&self) -> PiiType {
+                PiiType::CreditCard
+            }
+            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+                self.detect_with_validation(text, true)
+            }
+            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+                if let Some(start) = text.find("1234567890123456") {
+                    let candidate = "1234567890123456";
+                    if validate && !self.validate(candidate) {
+                        return vec![];
+                    }
+                    return vec![Detection {
+                        pii_type: PiiType::CreditCard,
+                        start,
+                        end: start + 16,
+                        original: candidate.to_string(),
+                    }];
+                }
+                vec![]
+            }
+            fn validate(&self, candidate: &str) -> bool {
+                candidate != "1234567890123456"
+            }
+        }
+
+        let policy = RedactionPolicy::builder()
+            .strict_validation(false) // Disable validation
+            .build();
+        let redactor = Redactor::new(vec![Box::new(TestCcDetector)], policy);
+
+        let input = "Card: 1234567890123456";
+        let result = redactor.redact(input);
+        // Should redact even though validation would fail
+        assert_ne!(result, input);
     }
 }

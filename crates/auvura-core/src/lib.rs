@@ -4,6 +4,9 @@ pub mod policy;
 pub mod redactor;
 pub mod types;
 
+#[cfg(feature = "ner")]
+pub mod ner;
+
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }

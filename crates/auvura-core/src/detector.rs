@@ -82,8 +82,9 @@ impl MultiDetector {
         Self::resolve_overlaps(detections)
     }
 
-    /// Resolve overlapping detections – keep highest priority PII type
-    /// (e.g., if "123-45-6789" matches both SSN and generic number, keep SSN)
+/// Resolve overlapping detections – keep highest priority PII type
+    /// Priority (higher = more specific): SSN(4) > CreditCard(3) > PhoneNumber(2) > Email(1)
+    /// If same priority, keep the longer span (more specific pattern)
     fn resolve_overlaps(mut detections: Vec<Detection>) -> Vec<Detection> {
         if detections.is_empty() {
             return detections;
@@ -92,6 +93,7 @@ impl MultiDetector {
         detections.sort_by(|a, b| {
             a.start
                 .cmp(&b.start)
+                .then_with(|| pii_priority(b.pii_type).cmp(&pii_priority(a.pii_type)))
                 .then_with(|| (b.end - b.start).cmp(&(a.end - a.start)))
         });
 
@@ -100,9 +102,12 @@ impl MultiDetector {
 
         for i in 1..detections.len() {
             if detections[i].start < detections[current_idx].end {
-                // Overlap detected – keep the longer span (more specific pattern)
-                if detections[i].end - detections[i].start
-                    > detections[current_idx].end - detections[current_idx].start
+                // Overlap detected – keep higher priority (or longer span if same priority)
+                if pii_priority(detections[i].pii_type) > pii_priority(detections[current_idx].pii_type)
+                    || (pii_priority(detections[i].pii_type)
+                        == pii_priority(detections[current_idx].pii_type)
+                        && (detections[i].end - detections[i].start)
+                            > (detections[current_idx].end - detections[current_idx].start))
                 {
                     current_idx = i;
                 }
@@ -113,6 +118,18 @@ impl MultiDetector {
         }
         resolved.push(detections[current_idx].clone());
         resolved
+    }
+}
+
+/// Returns priority for PII type (higher = more specific)
+/// SSN > CreditCard > PhoneNumber > Email > IpAddress
+fn pii_priority(pii_type: PiiType) -> u8 {
+    match pii_type {
+        PiiType::Ssn => 4,
+        PiiType::CreditCard => 3,
+        PiiType::PhoneNumber => 2,
+        PiiType::Email => 1,
+        PiiType::IpAddressV4 | PiiType::IpAddressV6 => 0,
     }
 }
 
@@ -176,5 +193,34 @@ mod tests {
         let resolved = MultiDetector::resolve_overlaps(vec![short.clone(), long.clone()]);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].pii_type, PiiType::Ssn); // Longer match wins
+    }
+
+    #[test]
+    fn test_resolve_overlaps_priority_over_length() {
+        // SSN has higher priority (4) than PhoneNumber (2)
+        // Even if PhoneNumber is longer, SSN should win
+        let phone = Detection {
+            pii_type: PiiType::PhoneNumber,
+            start: 10,
+            end: 25, // longer span
+            original: "123-456-7890".to_string(),
+        };
+        let ssn = Detection {
+            pii_type: PiiType::Ssn,
+            start: 12,
+            end: 23, // shorter span but higher priority
+            original: "123-45-6789".to_string(),
+        };
+
+        let resolved = MultiDetector::resolve_overlaps(vec![phone, ssn]);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].pii_type, PiiType::Ssn); // Higher priority wins
+    }
+
+    #[test]
+    fn test_pii_priority_ordering() {
+        assert!(pii_priority(PiiType::Ssn) > pii_priority(PiiType::CreditCard));
+        assert!(pii_priority(PiiType::CreditCard) > pii_priority(PiiType::PhoneNumber));
+        assert!(pii_priority(PiiType::PhoneNumber) > pii_priority(PiiType::Email));
     }
 }

@@ -101,11 +101,10 @@ impl CreditCardDetector {
         if s.starts_with("6011") || s.starts_with("65") {
             return true;
         }
-        if s.starts_with("64") {
-            if let Some(third) = s.chars().nth(2).and_then(|c| c.to_digit(10)) {
-                if (4..=9).contains(&third) {
-                    return true;
-                }
+        // Check for Discover BIN range 644-649
+        if let Some(first_three) = s.get(0..3).and_then(|s| s.parse::<u16>().ok()) {
+            if (644..=649).contains(&first_three) {
+                return true;
             }
         }
 

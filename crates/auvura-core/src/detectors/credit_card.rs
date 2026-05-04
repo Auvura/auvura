@@ -133,6 +133,10 @@ impl PiiDetector for CreditCardDetector {
     }
 
     fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+        self.detect_with_validation(text, true)
+    }
+
+    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
         let mut detections = Vec::new();
 
         for m in self.pattern.find_iter(text) {
@@ -165,8 +169,8 @@ impl PiiDetector for CreditCardDetector {
                 continue;
             }
 
-            // Validation chain: Luhn + BIN patterns
-            if Self::passes_luhn(&cleaned) && Self::is_valid_card_number(&cleaned) {
+            // Validation chain: Luhn + BIN patterns (skip if validation disabled)
+            if !validate || (Self::passes_luhn(&cleaned) && Self::is_valid_card_number(&cleaned)) {
                 detections.push(Detection {
                     pii_type: PiiType::CreditCard,
                     start,

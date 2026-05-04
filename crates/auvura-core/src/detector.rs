@@ -34,6 +34,15 @@ pub trait PiiDetector: Send + Sync {
     /// - MUST handle UTF-8 boundaries correctly (never split grapheme clusters)
     fn detect<'a>(&self, text: &'a str) -> Vec<Detection>;
 
+    /// Detect PII with optional validation bypass
+    /// Called by redactor with policy's strict_validation setting
+    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+        // Default: ignore validation flag and use detect()
+        // Detectors that support validation should override this
+        let _ = validate;
+        self.detect(text)
+    }
+
     /// Optional validation step (e.g., Luhn check for credit cards)
     /// Called by redactor AFTER pattern match to reduce false positives
     fn validate(&self, _candidate: &str) -> bool {
@@ -61,6 +70,15 @@ impl MultiDetector {
             detections.extend(detector.detect(text));
         }
         // Sort and resolve overlaps (critical for correct redaction)
+        Self::resolve_overlaps(detections)
+    }
+
+    /// Detect with optional validation bypass
+    pub fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+        let mut detections: Vec<Detection> = Vec::new();
+        for detector in &self.detectors {
+            detections.extend(detector.detect_with_validation(text, validate));
+        }
         Self::resolve_overlaps(detections)
     }
 

@@ -5,6 +5,12 @@ use crate::{
 };
 use std::borrow::Cow;
 
+/// Helper enum to track what kind of redaction to apply at a span
+enum RedactionKind<'a> {
+    Pii(&'a Detection),
+    Blocklist,
+}
+
 /// Core redaction engine – orchestrates policy, detection, and redaction
 pub struct Redactor {
     detector: MultiDetector,
@@ -26,24 +32,23 @@ impl Redactor {
             return Cow::Borrowed(text);
         }
 
-        // Step 1: Apply blocklist replacements
-        let mut working_text = text.to_string();
-        let mut blocklist_applied = false;
-        for term in self.policy.blocklist_terms() {
-            if working_text.contains(term.as_str()) {
-                working_text = working_text.replace(term.as_str(), &"█".repeat(term.len()));
-                blocklist_applied = true;
-            }
-        }
+        // Step 1: Find allowlist spans on ORIGINAL text (before any modification)
+        let allowlist_spans = self.find_allowlist_spans(text);
 
-        // Step 2: Find allowlist spans
-        let allowlist_spans = self.find_allowlist_spans(&working_text);
+        // Step 2: Run detectors on ORIGINAL text (not modified by blocklist)
+        // Pass validation flag from policy
+        let detections = self
+            .detector
+            .detect_with_validation(text, self.policy.requires_validation());
 
-        // Step 3: Run detectors
-        let detections = self.detector.detect(&working_text);
+        // Step 2b: Filter out detections for disabled PII types
+        let enabled_detections: Vec<Detection> = detections
+            .into_iter()
+            .filter(|d| self.policy.is_enabled(d.pii_type))
+            .collect();
 
-        // Step 4: Filter detections overlapping with allowlist
-        let filtered_detections: Vec<Detection> = detections
+        // Step 3: Filter detections - remove those overlapping with allowlist
+        let filtered_detections: Vec<Detection> = enabled_detections
             .into_iter()
             .filter(|d| {
                 !allowlist_spans
@@ -52,17 +57,71 @@ impl Redactor {
             })
             .collect();
 
-        // Step 5: Zero-copy path if no changes
-        if filtered_detections.is_empty() && !blocklist_applied {
+        // Step 4: Find blocklist spans on ORIGINAL text, filter by allowlist
+        let blocklist_spans: Vec<(usize, usize)> = self
+            .policy
+            .blocklist_terms()
+            .iter()
+            .flat_map(|term| {
+                let allowlist = &allowlist_spans;
+                text.match_indices(term.as_str()).filter_map(move |(start, _)| {
+                    let end = start + term.len();
+                    let overlaps_allowlist = allowlist
+                        .iter()
+                        .any(|&(a_start, a_end)| start < a_end && end > a_start);
+                    if overlaps_allowlist {
+                        None
+                    } else {
+                        Some((start, end))
+                    }
+                })
+            })
+            .collect();
+
+        // Step 5: If nothing to redact, return original
+        if filtered_detections.is_empty() && blocklist_spans.is_empty() {
             return Cow::Borrowed(text);
         }
 
-        // Step 6: Apply redactions (always returns owned String)
-        if filtered_detections.is_empty() {
-            return Cow::Owned(working_text);
+        // Step 6: Apply all redactions in one pass over the original text
+        let mut result = String::with_capacity(text.len());
+        let mut last_idx = 0;
+
+        // Merge PII detections and blocklist spans into sorted list
+        let mut all_spans: Vec<(usize, usize, RedactionKind<'_>)> = Vec::new();
+
+        for d in &filtered_detections {
+            all_spans.push((d.start, d.end, RedactionKind::Pii(d)));
+        }
+        for &(start, end) in &blocklist_spans {
+            all_spans.push((start, end, RedactionKind::Blocklist));
         }
 
-        Cow::Owned(self.apply_redactions(&working_text, &filtered_detections))
+        all_spans.sort_by_key(|&(start, _, _)| start);
+
+        for (start, end, kind) in all_spans {
+            if start > last_idx {
+                result.push_str(&text[last_idx..start]);
+            }
+
+            match kind {
+                RedactionKind::Pii(detection) => {
+                    let redacted = self.redact_structured(&detection.original, detection.pii_type);
+                    result.push_str(&redacted);
+                }
+                RedactionKind::Blocklist => {
+                    result.push_str(&"█".repeat(end - start));
+                }
+            }
+
+            last_idx = end;
+        }
+
+        if last_idx < text.len() {
+            result.push_str(&text[last_idx..]);
+        }
+
+        Cow::Owned(result)
     }
 
     fn find_allowlist_spans(&self, text: &str) -> Vec<(usize, usize)> {
@@ -74,28 +133,6 @@ impl Redactor {
             }
         }
         spans
-    }
-
-    fn apply_redactions(&self, text: &str, detections: &[Detection]) -> String {
-        let mut result = String::with_capacity(text.len());
-        let mut last_idx = 0;
-
-        for detection in detections {
-            if detection.start > last_idx {
-                result.push_str(&text[last_idx..detection.start]);
-            }
-
-            let redacted = self.redact_structured(&detection.original, detection.pii_type);
-            result.push_str(&redacted);
-
-            last_idx = detection.end;
-        }
-
-        if last_idx < text.len() {
-            result.push_str(&text[last_idx..]);
-        }
-
-        result
     }
 
     fn redact_structured(&self, original: &str, pii_type: PiiType) -> String {
@@ -259,6 +296,70 @@ mod tests {
     }
 
     #[test]
+    fn test_blocklist_does_not_break_pii_detection() {
+        // Regression test: blocklist must not modify text before PII detection
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["example"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        // "example" is in blocklist, but the email should still be detected
+        // and redacted properly (not broken by blocklist replacement)
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        // Email should be redacted with structured format
+        assert!(result.contains("@"));
+        assert!(result.contains(".com"));
+        // Blocklist "example" should also be redacted
+        assert!(!result.contains("example"));
+    }
+
+    #[test]
+    fn test_blocklist_and_pii_both_redacted() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["SPAM"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "SPAM Email: john@example.com";
+        let result = redactor.redact(input);
+        // Both blocklist and PII should be redacted
+        assert!(!result.contains("SPAM"));
+        assert!(result.contains("@"));
+    }
+
+    #[test]
+    fn test_disabled_pii_type_not_redacted() {
+        // Test that disabling a PII type via policy actually works
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .disable(PiiType::Email)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        // Email should NOT be redacted since we disabled Email type
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_enabled_pii_type_is_redacted() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .enable(PiiType::Email)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        // Email should be redacted since Email type is enabled (explicitly)
+        assert!(result.contains("@███████.com"));
+    }
+
+    #[test]
     fn test_ssn_structured_redaction() {
         struct SsnDetector;
         impl PiiDetector for SsnDetector {
@@ -337,5 +438,87 @@ mod tests {
         let input = "Card: 4111 1111 1111 1111";
         let result = redactor.redact(input);
         assert_eq!(result, "Card: ████ ████ ████ 1111");
+    }
+
+    #[test]
+    fn test_strict_validation_skips_invalid_cards_when_enabled() {
+        // When strict_validation is true (default), invalid Luhn numbers should not be detected
+        struct TestCcDetector;
+        impl PiiDetector for TestCcDetector {
+            fn pii_type(&self) -> PiiType {
+                PiiType::CreditCard
+            }
+            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+                self.detect_with_validation(text, true)
+            }
+            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+                if let Some(start) = text.find("1234567890123456") {
+                    let candidate = "1234567890123456";
+                    if validate && !self.validate(candidate) {
+                        return vec![];
+                    }
+                    return vec![Detection {
+                        pii_type: PiiType::CreditCard,
+                        start,
+                        end: start + 16,
+                        original: candidate.to_string(),
+                    }];
+                }
+                vec![]
+            }
+            fn validate(&self, candidate: &str) -> bool {
+                // This invalid number should fail validation
+                candidate != "1234567890123456"
+            }
+        }
+
+        let policy = RedactionPolicy::default(); // strict_validation = true by default
+        let redactor = Redactor::new(vec![Box::new(TestCcDetector)], policy);
+
+        let input = "Card: 1234567890123456";
+        let result = redactor.redact(input);
+        // Should NOT redact since validation fails
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_strict_validation_allows_invalid_cards_when_disabled() {
+        struct TestCcDetector;
+        impl PiiDetector for TestCcDetector {
+            fn pii_type(&self) -> PiiType {
+                PiiType::CreditCard
+            }
+            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+                self.detect_with_validation(text, true)
+            }
+            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+                if let Some(start) = text.find("1234567890123456") {
+                    let candidate = "1234567890123456";
+                    if validate && !self.validate(candidate) {
+                        return vec![];
+                    }
+                    return vec![Detection {
+                        pii_type: PiiType::CreditCard,
+                        start,
+                        end: start + 16,
+                        original: candidate.to_string(),
+                    }];
+                }
+                vec![]
+            }
+            fn validate(&self, candidate: &str) -> bool {
+                candidate != "1234567890123456"
+            }
+        }
+
+        let policy = RedactionPolicy::builder()
+            .strict_validation(false) // Disable validation
+            .build();
+        let redactor = Redactor::new(vec![Box::new(TestCcDetector)], policy);
+
+        let input = "Card: 1234567890123456";
+        let result = redactor.redact(input);
+        // Should redact even though validation would fail
+        assert_ne!(result, input);
     }
 }

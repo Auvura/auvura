@@ -88,32 +88,23 @@ impl CreditCardDetector {
                     }
                 }
             }
-            if s.starts_with("222")
-                || s.starts_with("223")
-                || s.starts_with("224")
-                || s.starts_with("225")
-                || s.starts_with("226")
-                || s.starts_with("227")
-                || s.starts_with("228")
-                || s.starts_with("229")
-                || s.starts_with("23")
-                || s.starts_with("24")
-                || s.starts_with("25")
-                || s.starts_with("26")
-                || s.starts_with("27")
-            {
-                return true;
+            // Check for Mastercard BIN range 2221-2720
+            // Parse first 4 digits as a number and check if in range
+            if let Some(first_four) = s.get(0..4).and_then(|s| s.parse::<u16>().ok()) {
+                if (2221..=2720).contains(&first_four) {
+                    return true;
+                }
             }
+        }
 
-            // Discover: 6011, 65, 644-649
-            if s.starts_with("6011") || s.starts_with("65") {
-                return true;
-            }
-            if s.starts_with("64") {
-                if let Some(third) = s.chars().nth(2).and_then(|c| c.to_digit(10)) {
-                    if (4..=9).contains(&third) {
-                        return true;
-                    }
+        // Discover: 6011, 65, 644-649
+        if s.starts_with("6011") || s.starts_with("65") {
+            return true;
+        }
+        if s.starts_with("64") {
+            if let Some(third) = s.chars().nth(2).and_then(|c| c.to_digit(10)) {
+                if (4..=9).contains(&third) {
+                    return true;
                 }
             }
         }
@@ -319,6 +310,43 @@ mod tests {
     fn test_rejects_long_number() {
         let detector = CreditCardDetector::new();
         let text = "ID: 12345678901234567890"; // Too long
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_accepts_mastercard_bin_2221() {
+        // BIN 2221 is within valid range 2221-2720
+        let detector = CreditCardDetector::new();
+        let text = "Card: 2221000000000009";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_rejects_mastercard_bin_2220() {
+        // BIN 2220 is OUTSIDE valid range 2221-2720
+        let detector = CreditCardDetector::new();
+        let text = "Card: 2220000000000009";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_accepts_mastercard_bin_2720() {
+        // BIN 2720 is within valid range 2221-2720
+        // Valid Luhn number: 2720000000000005
+        let detector = CreditCardDetector::new();
+        let text = "Card: 2720000000000005";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_rejects_mastercard_bin_2721() {
+        // BIN 2721 is OUTSIDE valid range
+        let detector = CreditCardDetector::new();
+        let text = "Card: 2721000000000009";
         let detections = detector.detect(text);
         assert_eq!(detections.len(), 0);
     }

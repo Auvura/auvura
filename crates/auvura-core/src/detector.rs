@@ -42,12 +42,6 @@ pub trait PiiDetector: Send + Sync {
         let _ = validate;
         self.detect(text)
     }
-
-    /// Optional validation step (e.g., Luhn check for credit cards)
-    /// Called by redactor AFTER pattern match to reduce false positives
-    fn validate(&self, _candidate: &str) -> bool {
-        true // Default: no validation required
-    }
 }
 
 /// Composite detector for single-pass scanning

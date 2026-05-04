@@ -454,7 +454,8 @@ mod tests {
             fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
                 if let Some(start) = text.find("1234567890123456") {
                     let candidate = "1234567890123456";
-                    if validate && !self.validate(candidate) {
+                    // Simulate validation failure when validate=true
+                    if validate {
                         return vec![];
                     }
                     return vec![Detection {
@@ -465,10 +466,6 @@ mod tests {
                     }];
                 }
                 vec![]
-            }
-            fn validate(&self, candidate: &str) -> bool {
-                // This invalid number should fail validation
-                candidate != "1234567890123456"
             }
         }
 
@@ -494,7 +491,8 @@ mod tests {
             fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
                 if let Some(start) = text.find("1234567890123456") {
                     let candidate = "1234567890123456";
-                    if validate && !self.validate(candidate) {
+                    // Simulate validation failure when validate=true
+                    if validate {
                         return vec![];
                     }
                     return vec![Detection {
@@ -505,9 +503,6 @@ mod tests {
                     }];
                 }
                 vec![]
-            }
-            fn validate(&self, candidate: &str) -> bool {
-                candidate != "1234567890123456"
             }
         }
 

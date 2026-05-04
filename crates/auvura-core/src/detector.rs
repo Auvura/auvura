@@ -76,41 +76,51 @@ impl MultiDetector {
         Self::resolve_overlaps(detections)
     }
 
-/// Resolve overlapping detections – keep highest priority PII type
+    /// Resolve overlapping detections – keep highest priority PII type
     /// Priority (higher = more specific): SSN(4) > CreditCard(3) > PhoneNumber(2) > Email(1)
     /// If same priority, keep the longer span (more specific pattern)
-    fn resolve_overlaps(mut detections: Vec<Detection>) -> Vec<Detection> {
+    fn resolve_overlaps(detections: Vec<Detection>) -> Vec<Detection> {
         if detections.is_empty() {
             return detections;
         }
 
-        detections.sort_by(|a, b| {
+        let mut sorted = detections;
+        sorted.sort_by(|a, b| {
             a.start
                 .cmp(&b.start)
                 .then_with(|| pii_priority(b.pii_type).cmp(&pii_priority(a.pii_type)))
                 .then_with(|| (b.end - b.start).cmp(&(a.end - a.start)))
         });
 
-        let mut resolved = Vec::with_capacity(detections.len());
+        let mut resolved = Vec::with_capacity(sorted.len());
         let mut current_idx = 0;
+        let mut keep: Vec<bool> = vec![false; sorted.len()];
+        keep[0] = true;
 
-        for i in 1..detections.len() {
-            if detections[i].start < detections[current_idx].end {
+        for i in 1..sorted.len() {
+            if sorted[i].start < sorted[current_idx].end {
                 // Overlap detected – keep higher priority (or longer span if same priority)
-                if pii_priority(detections[i].pii_type) > pii_priority(detections[current_idx].pii_type)
-                    || (pii_priority(detections[i].pii_type)
-                        == pii_priority(detections[current_idx].pii_type)
-                        && (detections[i].end - detections[i].start)
-                            > (detections[current_idx].end - detections[current_idx].start))
+                if pii_priority(sorted[i].pii_type) > pii_priority(sorted[current_idx].pii_type)
+                    || (pii_priority(sorted[i].pii_type)
+                        == pii_priority(sorted[current_idx].pii_type)
+                        && (sorted[i].end - sorted[i].start)
+                            > (sorted[current_idx].end - sorted[current_idx].start))
                 {
+                    keep[current_idx] = false;
                     current_idx = i;
+                    keep[i] = true;
                 }
             } else {
-                resolved.push(detections[current_idx].clone());
                 current_idx = i;
+                keep[i] = true;
             }
         }
-        resolved.push(detections[current_idx].clone());
+
+        for (i, d) in sorted.into_iter().enumerate() {
+            if keep[i] {
+                resolved.push(d);
+            }
+        }
         resolved
     }
 }

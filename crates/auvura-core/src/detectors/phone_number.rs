@@ -129,17 +129,7 @@ impl PiiDetector for PhoneNumberDetector {
             }
         }
 
-        // Remove overlaps
-        detections.sort_by_key(|d| d.start);
-        let mut filtered = Vec::new();
-        let mut last_end = 0;
-        for d in detections {
-            if d.start >= last_end {
-                filtered.push(d.clone());
-                last_end = d.end;
-            }
-        }
-        filtered
+        detections
     }
 }
 

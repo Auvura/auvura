@@ -133,6 +133,86 @@ curl http://localhost:3000/v1/chat/completions \
 - [ ] Quoted email local parts (V2)
 - [ ] Performance benchmarking
 
+## How to Contribute
+
+We welcome contributions! Here's how to get started:
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/auvura.git
+cd auvura
+
+# Build the project
+cargo build --workspace
+
+# Run tests
+cargo test --workspace
+
+# Run linter
+cargo clippy --workspace
+
+# Run formatter check
+cargo fmt --workspace --check
+```
+
+### Branch Naming Convention
+
+We use conventional branch prefixes:
+- `feat/` - New features
+- `fix/` - Bug fixes
+- `refactor/` - Code refactoring
+- `chore/` - Maintenance tasks
+- `docs/` - Documentation updates
+- `test/` - Adding or updating tests
+
+Examples:
+- `fix/email/invalid-regex`
+- `feat/proxy/anthropic-support`
+- `refactor/core/reduce-allocations`
+
+### Commit Convention
+
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <subject>
+
+<body>
+```
+
+Examples:
+- `fix(credit_card): correct Mastercard BIN range validation`
+- `feat(proxy): add OpenAI-compatible endpoint`
+- `refactor(detector): reduce cloning in overlap resolution`
+- `docs(readme): update usage examples`
+
+### Pull Request Process
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feat/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat(scope): add amazing feature'`)
+4. Push to the branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
+
+### Adding a New Detector
+
+1. Create a new file in `crates/auvura-core/src/detectors/`
+2. Implement the `PiiDetector` trait
+3. Add module declaration in `mod.rs`
+4. Add comprehensive tests
+5. Update compliance profiles in `policy.rs` if needed
+
+### Code Review Checklist
+
+- [ ] All tests pass (`cargo test --workspace`)
+- [ ] No clippy warnings (`cargo clippy --workspace`)
+- [ ] Code is formatted (`cargo fmt --workspace`)
+- [ ] Documentation updated (if needed)
+- [ ] Tests added for new functionality
+- [ ] Breaking changes documented
+
 ## License
 
 Apache-2.0

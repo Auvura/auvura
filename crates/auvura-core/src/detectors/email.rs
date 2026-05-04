@@ -46,11 +46,19 @@ impl PiiDetector for EmailDetector {
     fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
-            .map(|m| Detection {
-                pii_type: PiiType::Email,
-                start: m.start(),
-                end: m.end(),
-                original: m.as_str().to_string(),
+            .filter_map(|m| {
+                let email = m.as_str();
+                let local_part = email.split('@').next().unwrap_or("");
+                // Reject emails with consecutive dots in local part (invalid per RFC 5322)
+                if local_part.contains("..") {
+                    return None;
+                }
+                Some(Detection {
+                    pii_type: PiiType::Email,
+                    start: m.start(),
+                    end: m.end(),
+                    original: email.to_string(),
+                })
             })
             .collect()
     }
@@ -217,6 +225,16 @@ mod tests {
 
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "12345@company.com");
+    }
+
+    #[test]
+    fn test_rejects_consecutive_dots_in_local_part() {
+        // Consecutive dots in local part are invalid per RFC 5322
+        let detector = EmailDetector::new();
+        let text = "Email: john..doe@example.com";
+        let detections = detector.detect(text);
+        // Should NOT detect emails with consecutive dots
+        assert_eq!(detections.len(), 0);
     }
 
     // V2 ENHANCEMENT TRACKING

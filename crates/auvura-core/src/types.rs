@@ -13,6 +13,8 @@ pub enum PiiType {
     CreditCard,
     IpAddressV4,
     IpAddressV6,
+    /// For NER-detected entities (names, organizations, locations)
+    Other(&'static str), // Label like "PERSON", "ORG", "LOC"
 }
 
 impl PiiType {
@@ -24,6 +26,7 @@ impl PiiType {
             Self::Ssn => "NIST SP 800-122 §2.1",
             Self::CreditCard => "PCI-DSS v4.0 + GDPR financial data",
             Self::IpAddressV4 | Self::IpAddressV6 => "GDPR Recital 30",
+            Self::Other(_label) => "Contextual PII (NER-detected)",
         }
     }
 
@@ -36,6 +39,7 @@ impl PiiType {
             Self::CreditCard => "[REDACTED_CC]",
             Self::IpAddressV4 => "[REDACTED_IPv4]",
             Self::IpAddressV6 => "[REDACTED_IPv6]",
+            Self::Other(_label) => "[REDACTED_OTHER]",
         }
     }
 

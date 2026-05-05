@@ -142,6 +142,7 @@ impl Redactor {
             PiiType::Ssn => self.redact_ssn_structured(original),
             PiiType::CreditCard => self.redact_credit_card_structured(original),
             PiiType::IpAddressV4 | PiiType::IpAddressV6 => "█".repeat(original.len()),
+            PiiType::Other(_) => "█".repeat(original.len()), // Generic redaction for NER
         }
     }
 

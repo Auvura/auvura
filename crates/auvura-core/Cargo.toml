@@ -12,3 +12,11 @@ serde_json.workspace = true
 regex = { workspace = true }
 phonelib = { workspace = true }
 zeroize = "1.8.2"
+
+# NER support (optional)
+candle-core = { version = "0.3", optional = true }
+candle-transformers = { version = "0.3", optional = true }
+
+[features]
+default = []
+ner = ["dep:candle-core", "dep:candle-transformers"]

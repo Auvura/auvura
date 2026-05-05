@@ -6,10 +6,12 @@
 use auvura_core::redactor::Redactor;
 use axum::{
     extract::{Json, State},
+    response::sse::{Event, Sse},
     routing::post,
     Router,
 };
 use dashmap::DashMap;
+use futures_util::StreamExt;
 use provider::ProviderAdapter;
 use reqwest::Client;
 use serde_json::Value;
@@ -42,6 +44,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(app_state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -153,6 +156,107 @@ async fn chat_completions(
         Json(Value::Object(serde_json::Map::from_iter(vec![
             ("error".to_string(), Value::String(format!("Unknown provider: {}", provider_name)))
         ])))
+    }
+}
+
+/// SSE streaming endpoint with chunk buffering for placeholder reconstruction
+async fn chat_completions_stream(
+    State(state): State<Arc<AppConfig>>,
+    Json(mut request): Json<Value>,
+) -> impl axum::response::IntoResponse {
+    // Redaction logic
+    let mut session_id = None;
+    let mut session_id_value = None;
+    
+    if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        for message in messages {
+            if let Some(content) = message.get_mut("content").and_then(|c| c.as_str()) {
+                let original = content.to_string();
+                let redacted = state.redactor.redact(&original);
+                
+                if redacted.as_ref() != original.as_str() {
+                    let id = Uuid::new_v4().to_string();
+                    state.context_store.insert(id.clone(), original.clone());
+                    session_id = Some(id.clone());
+                    session_id_value = Some(id.clone());
+                    message["content"] = Value::String(redacted.into_owned());
+                } else {
+                    message["content"] = Value::String(redacted.into_owned());
+                }
+            }
+        }
+    }
+    
+    // Add session ID to request after the mutable borrow is released
+    if let Some(id) = session_id_value {
+        request["_auvura_session"] = Value::String(id);
+    }
+
+    // Determine provider
+    let provider_name = request
+        .get("provider")
+        .and_then(|p| p.as_str())
+        .unwrap_or("openai")
+        .to_lowercase();
+
+    if let Some((adapter, api_key)) = state.providers.get(&provider_name) {
+        let provider_request = adapter.translate_request(&request);
+        let url = format!("{}/chat/completions", adapter.base_url());
+        let headers = adapter.required_headers(api_key);
+
+        // Add stream=true to the request
+        let mut stream_request = provider_request.clone();
+        if let Some(obj) = stream_request.as_object_mut() {
+            obj.insert("stream".to_string(), Value::Bool(true));
+        }
+
+        let mut req_builder = state.http_client.post(&url);
+        for (key, value) in headers {
+            req_builder = req_builder.header(&key, &value);
+        }
+
+        match req_builder.json(&stream_request).send().await {
+            Ok(response) => {
+                // Clone Arcs for use in the stream (they need 'static lifetime)
+                let context_store = state.context_store.clone();
+                let session_id_clone = session_id.clone();
+                let state_clone = state.clone();
+                
+                let stream: futures::stream::BoxStream<Result<Event, reqwest::Error>> = 
+                    Box::pin(response.bytes_stream().map(move |chunk| {
+                        match chunk {
+                            Ok(bytes) => {
+                                let mut text = String::from_utf8_lossy(&bytes).to_string();
+                                
+                                // Reconstruct if we have context
+                                if let Some(id) = &session_id_clone {
+                                    if let Some(original) = context_store.get(id) {
+                                        let redacted_form: String = 
+                                            state_clone.redactor.redact(original.as_str()).into_owned();
+                                        text = text.replace(&redacted_form, original.as_str());
+                                    }
+                                }
+                                
+                                Ok(Event::default().data(text))
+                            }
+                            Err(e) => Ok(Event::default().data(format!("Stream error: {}", e))),
+                        }
+                    }));
+                
+                Sse::new(stream)
+            }
+            Err(e) => {
+                let error_msg = format!("Provider request failed: {}", e);
+                let stream: futures::stream::BoxStream<Result<Event, reqwest::Error>> = 
+                    Box::pin(futures_util::stream::iter(vec![Ok(Event::default().data(error_msg))]));
+                Sse::new(stream)
+            }
+        }
+    } else {
+        let error_msg = format!("Unknown provider: {}", provider_name);
+        let stream: futures::stream::BoxStream<Result<Event, reqwest::Error>> = 
+            Box::pin(futures_util::stream::iter(vec![Ok(Event::default().data(error_msg))]));
+        Sse::new(stream)
     }
 }
 

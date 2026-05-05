@@ -9,6 +9,7 @@ use axum::{
     routing::post,
     Router,
 };
+use dashmap::DashMap;
 use provider::ProviderAdapter;
 use reqwest::Client;
 use serde_json::Value;
@@ -16,13 +17,17 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio;
+use uuid::Uuid;
 
 mod provider;
+
+type AppState = Arc<AppConfig>;
 
 struct AppConfig {
     redactor: Redactor,
     providers: HashMap<String, (Box<dyn ProviderAdapter>, String)>,
     http_client: Client,
+    context_store: Arc<DashMap<String, String>>, // UUID -> Original value
 }
 
 #[tokio::main]
@@ -34,6 +39,7 @@ async fn main() {
         redactor: config.redactor,
         providers: config.providers,
         http_client: Client::new(),
+        context_store: Arc::new(DashMap::new()), // Initialize context store
     });
 
     let app = Router::new()
@@ -51,12 +57,23 @@ async fn chat_completions(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
 ) -> Json<Value> {
-    // Step 1: Redact sensitive data in the request
+    // Step 1: Redact sensitive data and store context (UUID -> original)
+    let mut session_id = None;
     if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
         for message in messages {
             if let Some(content) = message.get_mut("content").and_then(|c| c.as_str()) {
-                let redacted = state.redactor.redact(content);
-                message["content"] = Value::String(redacted.into_owned());
+                let original = content.to_string();
+                let redacted = state.redactor.redact(&original);
+                
+                // Store mapping for reconstruction
+                if redacted.as_ref() != original.as_str() {
+                    let id = Uuid::new_v4().to_string();
+                    state.context_store.insert(id.clone(), original.clone());
+                    session_id = Some(id);
+                    message["content"] = Value::String(redacted.into_owned());
+                } else {
+                    message["content"] = Value::String(redacted.into_owned());
+                }
             }
         }
     }
@@ -70,7 +87,6 @@ async fn chat_completions(
 
     eprintln!("[Proxy] Using provider: {}", provider_name);
     eprintln!("[Proxy] Available providers: {:?}", state.providers.keys());
-    eprintln!("[Proxy] Request: {}", serde_json::to_string_pretty(&request).unwrap_or_default());
 
     if let Some((adapter, api_key)) = state.providers.get(&provider_name) {
         // Step 3: Translate request to provider format
@@ -89,7 +105,41 @@ async fn chat_completions(
             Ok(response) => {
                 if let Ok(provider_response) = response.json::<Value>().await {
                     // Step 5: Translate response back to OpenAI format
-                    let standard_response = adapter.translate_response(&provider_response);
+                    let mut standard_response = adapter.translate_response(&provider_response);
+                    
+                    // Step 6: Reconstruct original values from context store
+                    if let Some(id) = &session_id {
+                        if let Some(original) = state.context_store.get(id) {
+                            if let Some(choices) = standard_response
+                                .get_mut("choices")
+                                .and_then(|c| c.as_array_mut()) 
+                            {
+                                for choice in choices {
+                                    if let Some(message) = choice
+                                        .get_mut("message")
+                                        .and_then(|m| m.as_object_mut()) 
+                                    {
+                                        if let Some(content) = message
+                                            .get_mut("content")
+                                            .and_then(|c| c.as_str()) 
+                                        {
+                                            // Reconstruct: replace redacted form with original
+                                            let redacted_form: String = 
+                                                state.redactor.redact(original.as_str()).into_owned();
+                                            let reconstructed = content.replace(
+                                                &redacted_form,
+                                                original.as_str()
+                                            );
+                                            message["content"] = Value::String(reconstructed);
+                                        }
+                                    }
+                                }
+                            }
+                            // Clean up context store after use
+                            state.context_store.remove(id);
+                        }
+                    }
+                    
                     Json(standard_response)
                 } else {
                     Json(Value::Object(serde_json::Map::from_iter(vec![
@@ -108,12 +158,7 @@ async fn chat_completions(
     }
 }
 
-struct ProxyConfig {
-    redactor: Redactor,
-    providers: HashMap<String, (Box<dyn ProviderAdapter>, String)>,
-}
-
-fn load_config() -> ProxyConfig {
+fn load_config() -> AppConfig {
     // Simple config for now - in production this would load from file/env
     let redactor = Redactor::new(
         vec![], // Add detectors as needed
@@ -138,8 +183,10 @@ fn load_config() -> ProxyConfig {
         );
     }
 
-    ProxyConfig {
+    AppConfig {
         redactor,
         providers,
+        http_client: Client::new(),
+        context_store: Arc::new(DashMap::new()),
     }
 }

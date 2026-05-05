@@ -8,9 +8,11 @@ repository.workspace = true
 
 [dependencies]
 auvura-core = { path = "../auvura-core" }
-axum = { version = "0.8", features = ["json"] } # Using the 2025/26 stable 0.8
+axum = { version = "0.8", features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
 tower-http = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
+dashmap = "6"
+uuid = { version = "1", features = ["v4"] }

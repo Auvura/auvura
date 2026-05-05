@@ -65,9 +65,14 @@ async fn chat_completions(
     let provider_name = request
         .get("provider")
         .and_then(|p| p.as_str())
-        .unwrap_or("openai");
+        .unwrap_or("openai")
+        .to_lowercase();
 
-    if let Some((adapter, api_key)) = state.providers.get(provider_name) {
+    eprintln!("[Proxy] Using provider: {}", provider_name);
+    eprintln!("[Proxy] Available providers: {:?}", state.providers.keys());
+    eprintln!("[Proxy] Request: {}", serde_json::to_string_pretty(&request).unwrap_or_default());
+
+    if let Some((adapter, api_key)) = state.providers.get(&provider_name) {
         // Step 3: Translate request to provider format
         let provider_request = adapter.translate_request(&request);
 

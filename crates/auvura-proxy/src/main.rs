@@ -21,8 +21,6 @@ use uuid::Uuid;
 
 mod provider;
 
-type AppState = Arc<AppConfig>;
-
 struct AppConfig {
     redactor: Redactor,
     providers: HashMap<String, (Box<dyn ProviderAdapter>, String)>,

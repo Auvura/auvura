@@ -80,6 +80,7 @@ dependencies = [
  "auvura-core",
  "axum",
  "dashmap",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",

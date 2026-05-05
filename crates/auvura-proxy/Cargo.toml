@@ -11,8 +11,10 @@ auvura-core = { path = "../auvura-core" }
 axum = { version = "0.8", features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
 tower-http = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 dashmap = "6"
 uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3"
+futures = "0.3"

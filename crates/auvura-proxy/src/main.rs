@@ -297,7 +297,7 @@ async fn chat_completions_stream(
 
                         Ok(Event::default().data(text))
                     }
-                    Err(e) => Ok(Event::default().data(format!("Stream error: {}", e))),
+                    Err(e) => Ok(Event::default().event("error").data(format!("{}", e))),
                 }
             });
 

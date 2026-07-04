@@ -125,7 +125,8 @@ The client receives the reconstructed text in real-time. The actual PII never le
 | Phone | Various intl formats | `(███) ███-████` |
 | SSN | `###-##-####` | `███-██-████` |
 | Credit Card | `#### #### #### ####` | `████ ████ ████ 1111` |
-| IPv4/IPv6 | `192.168.1.1` | `█████████` |
+| IPv4 | `192.168.1.1` | `█████████████` |
+| IPv6 | `::ffff:192.168.1.1` | `██████████████████████` |
 
 ## How It Works
 
@@ -150,7 +151,7 @@ The client receives the reconstructed text in real-time. The actual PII never le
 - [x] Provider-agnostic proxy with OpenAI-compatible API
 - [x] SSE streaming endpoint with real-time PII reconstruction
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
-- [ ] IPv4/IPv6 detectors
+- [x] IPv4/IPv6 detectors
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [ ] CLI binary
 - [ ] Quoted email local parts (V2)

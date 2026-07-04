@@ -60,7 +60,10 @@ impl ProviderAdapter for AnthropicAdapter {
             // Convert OpenAI messages to Anthropic format
             if let Some(last_message) = messages.last() {
                 if let Some(content) = last_message.get("content").and_then(|c| c.as_str()) {
-                    anthropic_request.insert("prompt".to_string(), Value::String(format!("\n\nHuman: {}\n\nAssistant:", content)));
+                    anthropic_request.insert(
+                        "prompt".to_string(),
+                        Value::String(format!("\n\nHuman: {}\n\nAssistant:", content)),
+                    );
                 }
             }
         }

@@ -137,13 +137,19 @@ impl Redactor {
     }
 
     fn redact_structured(&self, original: &str, pii_type: PiiType) -> String {
+        // If a custom placeholder is configured, use it for simple replacement
+        if let Some(custom) = self.policy.custom_placeholder(pii_type) {
+            return custom.to_string();
+        }
+
+        // Default: format-preserving structured redaction
         match pii_type {
             PiiType::Email => self.redact_email_structured(original),
             PiiType::PhoneNumber => self.redact_phone_structured(original),
             PiiType::Ssn => self.redact_ssn_structured(original),
             PiiType::CreditCard => self.redact_credit_card_structured(original),
             PiiType::IpAddressV4 | PiiType::IpAddressV6 => "█".repeat(original.len()),
-            PiiType::Other(_) => "█".repeat(original.len()), // Generic redaction for NER
+            PiiType::Other(_) => "█".repeat(original.len()),
         }
     }
 
@@ -513,5 +519,44 @@ mod tests {
         let result = redactor.redact(input);
         // Should redact even though validation would fail
         assert_ne!(result, input);
+    }
+
+    #[test]
+    fn test_custom_placeholder_overrides_structured_redaction() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_placeholder(PiiType::Email, "[EMAIL]")
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Contact john@example.com";
+        let result = redactor.redact(input);
+        // Custom placeholder used instead of structured "████.███@███████.com"
+        assert_eq!(result, "Contact [EMAIL]");
+    }
+
+    #[test]
+    fn test_custom_placeholder_per_type() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_placeholder(PiiType::Email, "***EMAIL***")
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email: john@example.com";
+        let result = redactor.redact(input);
+        assert_eq!(result, "Email: ***EMAIL***");
+    }
+
+    #[test]
+    fn test_structured_redaction_used_when_no_custom_placeholder() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::default();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Contact john.doe@example.com";
+        let result = redactor.redact(input);
+        // Default: format-preserving structured redaction
+        assert_eq!(result, "Contact ████.███@███████.com");
     }
 }

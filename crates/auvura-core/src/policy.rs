@@ -59,6 +59,11 @@ impl RedactionPolicy {
             .unwrap_or_else(|| pii_type.placeholder())
     }
 
+    /// Get custom placeholder if one is configured, otherwise None
+    pub fn custom_placeholder(&self, pii_type: PiiType) -> Option<&str> {
+        self.placeholder_map.get(&pii_type).map(String::as_str)
+    }
+
     /// Check if text is in allowlist (should NEVER be redacted)
     pub fn is_allowed(&self, text: &str) -> bool {
         self.allowlist.iter().any(|term| text.contains(term))

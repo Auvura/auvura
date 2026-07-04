@@ -86,6 +86,15 @@ curl http://localhost:3000/v1/chat/completions \
     "messages": [{"role": "user", "content": "My email is john@example.com"}],
     "provider": "openai"
   }'
+
+# SSE streaming endpoint (real-time token-by-token response)
+curl -N http://localhost:3000/v1/chat/completions/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "openai"
+  }'
 ```
 
 ## Compliance Profiles
@@ -128,6 +137,7 @@ curl http://localhost:3000/v1/chat/completions \
 - [x] Compliance policy profiles (GDPR, HIPAA, PCI-DSS)
 - [x] Structured redaction engine
 - [x] Provider-agnostic proxy with OpenAI-compatible API
+- [x] SSE streaming endpoint with real-time PII reconstruction
 - [ ] IPv4/IPv6 detectors
 - [ ] CLI binary
 - [ ] Quoted email local parts (V2)

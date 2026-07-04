@@ -3,7 +3,14 @@
 //! Provides OpenAI-compatible endpoints that forward requests to any AI provider
 //! while ensuring sensitive data never leaves the local environment.
 
-use auvura_core::redactor::Redactor;
+use auvura_core::{
+    detector::PiiDetector,
+    detectors::{
+        credit_card::CreditCardDetector, email::EmailDetector, phone_number::PhoneNumberDetector,
+        ssn::SSNDetector,
+    },
+    redactor::Redactor,
+};
 use axum::{
     extract::{Json, State},
     response::sse::{Event, Sse},
@@ -322,7 +329,13 @@ async fn chat_completions_stream(
 }
 
 fn load_config() -> (Redactor, ProviderMap) {
-    let redactor = Redactor::new(vec![], auvura_core::policy::RedactionPolicy::default());
+    let detectors: Vec<Box<dyn PiiDetector>> = vec![
+        Box::new(EmailDetector::new()),
+        Box::new(PhoneNumberDetector::new()),
+        Box::new(SSNDetector::new()),
+        Box::new(CreditCardDetector::new()),
+    ];
+    let redactor = Redactor::new(detectors, auvura_core::policy::RedactionPolicy::default());
 
     let mut providers: ProviderMap = HashMap::new();
 

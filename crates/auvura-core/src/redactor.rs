@@ -64,17 +64,18 @@ impl Redactor {
             .iter()
             .flat_map(|term| {
                 let allowlist = &allowlist_spans;
-                text.match_indices(term.as_str()).filter_map(move |(start, _)| {
-                    let end = start + term.len();
-                    let overlaps_allowlist = allowlist
-                        .iter()
-                        .any(|&(a_start, a_end)| start < a_end && end > a_start);
-                    if overlaps_allowlist {
-                        None
-                    } else {
-                        Some((start, end))
-                    }
-                })
+                text.match_indices(term.as_str())
+                    .filter_map(move |(start, _)| {
+                        let end = start + term.len();
+                        let overlaps_allowlist = allowlist
+                            .iter()
+                            .any(|&(a_start, a_end)| start < a_end && end > a_start);
+                        if overlaps_allowlist {
+                            None
+                        } else {
+                            Some((start, end))
+                        }
+                    })
             })
             .collect();
 
@@ -335,9 +336,7 @@ mod tests {
     fn test_disabled_pii_type_not_redacted() {
         // Test that disabling a PII type via policy actually works
         let detector = SimpleEmailDetector;
-        let policy = RedactionPolicy::builder()
-            .disable(PiiType::Email)
-            .build();
+        let policy = RedactionPolicy::builder().disable(PiiType::Email).build();
         let redactor = Redactor::new(vec![Box::new(detector)], policy);
 
         let input = "Email: john@example.com";
@@ -349,9 +348,7 @@ mod tests {
     #[test]
     fn test_enabled_pii_type_is_redacted() {
         let detector = SimpleEmailDetector;
-        let policy = RedactionPolicy::builder()
-            .enable(PiiType::Email)
-            .build();
+        let policy = RedactionPolicy::builder().enable(PiiType::Email).build();
         let redactor = Redactor::new(vec![Box::new(detector)], policy);
 
         let input = "Email: john@example.com";

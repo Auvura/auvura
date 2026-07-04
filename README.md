@@ -138,7 +138,9 @@ curl -N http://localhost:3000/v1/chat/completions/stream \
 - [x] Structured redaction engine
 - [x] Provider-agnostic proxy with OpenAI-compatible API
 - [x] SSE streaming endpoint with real-time PII reconstruction
+- [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
 - [ ] IPv4/IPv6 detectors
+- [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [ ] CLI binary
 - [ ] Quoted email local parts (V2)
 - [ ] Performance benchmarking

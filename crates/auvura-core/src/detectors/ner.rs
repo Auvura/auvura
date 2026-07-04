@@ -1,24 +1,24 @@
 //! NER-based detector for unstructured PII (names, organizations)
 //!
-//! Uses BERT models via candle for Named Entity Recognition
-//! to detect people, organizations, and locations in text.
+//! Uses heuristic-based detection for people names in text.
+//! BERT-based NER via candle is planned for a future release.
 
-#[cfg(feature = "ner")]
-use candle_core;
-#[cfg(feature = "ner")]
-use candle_transformers;
-
-use crate::{detector::{Detection, PiiDetector}, types::PiiType};
+use crate::{
+    detector::{Detection, PiiDetector},
+    types::PiiType,
+};
 use std::collections::HashMap;
 
 /// NER-based detector for unstructured PII
-#[cfg(feature = "ner")]
+///
+/// Currently a placeholder for future BERT-based NER.
+/// Returns empty results — use `SimpleNameDetector` for heuristic fallback.
+#[allow(dead_code)]
 pub struct NerDetector {
     model_path: String,
     tokenizer_path: String,
 }
 
-#[cfg(feature = "ner")]
 impl NerDetector {
     pub fn new(model_path: &str, tokenizer_path: &str) -> Self {
         Self {
@@ -26,41 +26,23 @@ impl NerDetector {
             tokenizer_path: tokenizer_path.to_string(),
         }
     }
-
-    fn load_model(&self) -> Result<NERModel, String> {
-        // Placeholder for actual candle model loading
-        // In production, this would load BERT from the specified paths
-        Err("NER feature not yet fully implemented".to_string())
-    }
 }
 
-#[cfg(feature = "ner")]
 impl PiiDetector for NerDetector {
     fn pii_type(&self) -> PiiType {
-        PiiType::Other("PERSON".to_string())
+        PiiType::Other("PERSON")
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
-        // Placeholder: In production, run BERT NER inference here
-        // For now, return empty vec
-        let _ = text;
+    fn detect(&self, _text: &str) -> Vec<Detection> {
+        // Placeholder: BERT NER inference not yet implemented
         vec![]
     }
 }
 
-/// Placeholder for when NER feature is disabled
-#[cfg(not(feature = "ner"))]
-pub struct NerDetector;
-
-#[cfg(not(feature = "ner"))]
-impl NerDetector {
-    pub fn new(_model_path: &str, _tokenizer_path: &str) -> Self {
-        Self
-    }
-}
-
-/// Non-BERT based fallback for names (simple heuristic)
-/// Used when NER feature is disabled
+/// Heuristic-based fallback for name detection
+///
+/// Detects capitalized words that are not at sentence start.
+/// Higher false-positive rate than BERT NER — use as fallback only.
 pub struct SimpleNameDetector;
 
 impl SimpleNameDetector {
@@ -69,16 +51,20 @@ impl SimpleNameDetector {
     }
 }
 
+impl Default for SimpleNameDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PiiDetector for SimpleNameDetector {
     fn pii_type(&self) -> PiiType {
-        PiiType::Other("PERSON".to_string())
+        PiiType::Other("PERSON")
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         let mut detections = Vec::new();
 
-        // Simple heuristic: capitalized words that might be names
-        // This is a basic fallback - real NER uses BERT
         let words: Vec<&str> = text.split_whitespace().collect();
         let mut byte_offset = 0;
 
@@ -89,7 +75,6 @@ impl PiiDetector for SimpleNameDetector {
                 && trimmed.len() > 1
                 && trimmed.chars().all(|c| c.is_alphabetic())
             {
-                // Check if it's not at the start of a sentence
                 if let Some(start) = text[byte_offset..].find(trimmed) {
                     let abs_start = byte_offset + start;
                     detections.push(Detection {
@@ -100,7 +85,7 @@ impl PiiDetector for SimpleNameDetector {
                     });
                 }
             }
-            byte_offset += word.len() + 1; // +1 for space
+            byte_offset += word.len() + 1;
         }
 
         detections
@@ -108,6 +93,9 @@ impl PiiDetector for SimpleNameDetector {
 }
 
 /// Token-based redaction for NER detections
+///
+/// Replaces PII with unique tokens like `[[PERSON_1]]`, `[[EMAIL_2]]`.
+/// Maintains a mapping from original text to tokens for reconstruction.
 pub struct TokenRedactor {
     token_map: HashMap<String, String>,
     counter: std::sync::atomic::AtomicUsize,
@@ -121,11 +109,10 @@ impl TokenRedactor {
         }
     }
 
-    /// Replace PII with unique tokens (e.g., [[PERSON_1]])
+    /// Replace PII with unique tokens (e.g., `[[PERSON_1]]`)
     pub fn redact_with_tokens(&mut self, text: &str, detections: &[Detection]) -> String {
         let mut result = text.to_string();
 
-        // Sort by start position in reverse order to maintain correct offsets
         let mut sorted = detections.to_vec();
         sorted.sort_by(|a, b| b.start.cmp(&a.start));
 
@@ -156,12 +143,5 @@ impl TokenRedactor {
 
         self.token_map.insert(original.to_string(), token.clone());
         token
-    }
-}
-
-/// Placeholder PII type for NER-detected entities
-impl PiiType {
-    pub fn other(label: String) -> Self {
-        PiiType::Other(label)
     }
 }

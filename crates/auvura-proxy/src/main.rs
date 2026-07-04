@@ -209,17 +209,22 @@ async fn chat_completions(
     }
 }
 
-/// SSE streaming endpoint with chunk buffering for placeholder reconstruction
+/// SSE streaming endpoint with token-based PII reconstruction
+///
+/// Strategy: Replace PII with unique token markers (e.g., `[[EMAIL_1]]`) and
+/// inject a system message telling the LLM to reference these tokens. The LLM
+/// echoes the tokens back, and we replace them with the originals in the stream.
+///
+/// For non-PII sessions, the stream passes through unchanged.
 async fn chat_completions_stream(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
 ) -> impl axum::response::IntoResponse {
     use futures_util::StreamExt;
 
-    // Redact PII and collect (session_id, original_text, redacted_form) for reconstruction
-    let mut session_id = None;
-    let mut original_text = None;
-    let mut redacted_form = None;
+    // token_map: token marker → original text (e.g., "[[EMAIL_1]]" → "john@example.com")
+    let mut token_map: HashMap<String, String> = HashMap::new();
+    let mut token_counter: usize = 0;
 
     if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
         for message in messages {
@@ -228,12 +233,11 @@ async fn chat_completions_stream(
                 let redacted = state.redactor.redact(&original);
 
                 if redacted.as_ref() != original.as_str() {
-                    let id = Uuid::new_v4().to_string();
-                    state.context_store.insert(id.clone(), original.clone());
-                    redacted_form = Some(redacted.into_owned());
-                    original_text = Some(original);
-                    session_id = Some(id);
-                    break;
+                    // PII found — replace with unique token markers
+                    let token = format!("[[PII_{}]]", token_counter);
+                    token_counter += 1;
+                    token_map.insert(token.clone(), original);
+                    message["content"] = Value::String(token);
                 } else {
                     message["content"] = Value::String(redacted.into_owned());
                 }
@@ -241,10 +245,47 @@ async fn chat_completions_stream(
         }
     }
 
-    // Inject session ID into the request after the mutable borrow is released
-    if let Some(id) = &session_id {
-        request["_auvura_session"] = Value::String(id.clone());
+    // Inject a system message explaining the tokens to the LLM
+    if !token_map.is_empty() {
+        let token_list: Vec<String> = token_map
+            .iter()
+            .map(|(token, orig)| {
+                // Show a masked version of the original (e.g., "j***@e***.com")
+                let masked = mask_original(orig);
+                format!("{} = redacted value ({})", token, masked)
+            })
+            .collect();
+
+        let system_note = format!(
+            "NOTE: The following tokens represent redacted sensitive information. \
+             Reference these exact tokens in your response — they will be \
+             reconstructed to the original values for the user.\n\n{}\n\n\
+             IMPORTANT: Use the token markers (e.g., [[PII_0]]) directly in your \
+             response. Do NOT attempt to write the original values.",
+            token_list.join("\n")
+        );
+
+        if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
+            // Insert as a system message at the beginning
+            let system_msg = serde_json::json!({
+                "role": "system",
+                "content": system_note
+            });
+            messages.insert(0, system_msg);
+        }
     }
+
+    // Store token map in context store (keyed by a session ID)
+    let session_id = if !token_map.is_empty() {
+        let id = Uuid::new_v4().to_string();
+        // Serialize token_map as JSON for storage
+        if let Ok(json) = serde_json::to_string(&token_map) {
+            state.context_store.insert(id.clone(), json);
+        }
+        Some(id)
+    } else {
+        None
+    };
 
     // Determine provider
     let provider_name = request
@@ -280,24 +321,28 @@ async fn chat_completions_stream(
         Ok(response) => {
             let context_store = state.context_store.clone();
 
-            // Pre-compute values for the stream closure
-            let has_pii = session_id.is_some();
+            // Pre-compute the reverse map for the stream closure
+            // We need String → String for the closure, not &str
+            let reverse_map: HashMap<String, String> = token_map.into_iter().collect();
+            let has_tokens = !reverse_map.is_empty();
             let session_id_clone = session_id.clone();
-            let redacted_form_str = redacted_form.clone();
-            let original_text_str = original_text.clone();
 
             let stream = response.bytes_stream().map(move |chunk| {
                 match chunk {
                     Ok(bytes) => {
                         let mut text = String::from_utf8_lossy(&bytes).to_string();
 
-                        // Reconstruct PII if this session had redacted content
-                        if has_pii {
-                            if let (Some(id), Some(ref form), Some(ref orig)) =
-                                (&session_id_clone, &redacted_form_str, &original_text_str)
-                            {
-                                if context_store.get(id).is_some() {
-                                    text = text.replace(form, orig);
+                        // Reconstruct PII by replacing token markers
+                        if has_tokens {
+                            if let Some(ref id) = session_id_clone {
+                                if let Some(stored) = context_store.get(id) {
+                                    if let Ok(map) =
+                                        serde_json::from_str::<HashMap<String, String>>(&stored)
+                                    {
+                                        for (token, original) in &map {
+                                            text = text.replace(token, original);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -308,7 +353,6 @@ async fn chat_completions_stream(
                 }
             });
 
-            // Wrap with cleanup guard — context store entry is removed when stream is dropped
             let cleanup_id = session_id.unwrap_or_default();
             Sse::new(StreamCleanup::new(
                 stream,
@@ -324,6 +368,22 @@ async fn chat_completions_stream(
                 state.context_store.clone(),
                 "".into(),
             ))
+        }
+    }
+}
+
+/// Mask an original value for the system message hint.
+/// Shows first/last char with asterisks in between.
+fn mask_original(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    match chars.len() {
+        0 => String::new(),
+        1 => "*".to_string(),
+        2 => format!("{}*", chars[0]),
+        3 => format!("{}*{}", chars[0], chars[2]),
+        _ => {
+            let last = chars.len() - 1;
+            format!("{}***{}", chars[0], chars[last])
         }
     }
 }

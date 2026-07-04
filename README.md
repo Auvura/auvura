@@ -97,6 +97,17 @@ curl -N http://localhost:3000/v1/chat/completions/stream \
   }'
 ```
 
+### How Streaming PII Reconstruction Works
+
+The streaming endpoint uses **token markers** to enable real-time PII reconstruction:
+
+1. **Redact**: `john@example.com` → `[[PII_0]]`
+2. **Inject system message**: Tells the LLM "Use `[[PII_0]]` in your response — it will be reconstructed"
+3. **LLM responds**: `"I'll send details to [[PII_0]]."`
+4. **Reconstruct**: `[[PII_0]]` → `john@example.com` in each stream chunk
+
+The client receives the reconstructed text in real-time. The actual PII never leaves your environment — only the token markers are sent to the provider.
+
 ## Compliance Profiles
 
 | Profile | Enabled Types | Use Case |

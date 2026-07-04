@@ -6,7 +6,10 @@
 use auvura_core::{
     detector::PiiDetector,
     detectors::{
-        credit_card::CreditCardDetector, email::EmailDetector, phone_number::PhoneNumberDetector,
+        credit_card::CreditCardDetector,
+        email::EmailDetector,
+        ip::{Ipv4Detector, Ipv6Detector},
+        phone_number::PhoneNumberDetector,
         ssn::SSNDetector,
     },
     redactor::Redactor,
@@ -394,6 +397,8 @@ fn load_config() -> (Redactor, ProviderMap) {
         Box::new(PhoneNumberDetector::new()),
         Box::new(SSNDetector::new()),
         Box::new(CreditCardDetector::new()),
+        Box::new(Ipv4Detector::new()),
+        Box::new(Ipv6Detector::new()),
     ];
     let redactor = Redactor::new(detectors, auvura_core::policy::RedactionPolicy::default());
 

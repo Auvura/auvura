@@ -66,6 +66,16 @@ let input = "Contact john@example.com or call 123-456-7890";
 let result = redactor.redact(input);
 println!("{}", result);
 // Output: "Contact ████.███@███████.com or call ███-███-████"
+
+// Custom placeholders (override format-preserving redaction)
+let policy = RedactionPolicy::builder()
+    .with_placeholder(PiiType::Email, "[EMAIL]")
+    .with_placeholder(PiiType::PhoneNumber, "[PHONE]")
+    .build();
+let redactor = Redactor::new(detectors, policy);
+let result = redactor.redact("Email john@example.com or call 123-456-7890");
+println!("{}", result);
+// Output: "Email [EMAIL] or call [PHONE]"
 ```
 
 ### Proxy Server

@@ -25,7 +25,12 @@ pub struct PhoneNumberDetector {
 impl PhoneNumberDetector {
     /// Create a PhoneNumberDetector with default country list (US, GB, DE, FR, CA, AU, JP)
     pub fn new() -> Self {
-        Self::with_countries(DEFAULT_PHONE_COUNTRIES.iter().map(|s| s.to_string()).collect())
+        Self::with_countries(
+            DEFAULT_PHONE_COUNTRIES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
     }
 
     /// Create a PhoneNumberDetector with a custom country priority list.

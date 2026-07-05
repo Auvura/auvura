@@ -179,10 +179,7 @@ impl CorsConfig {
 
         // Methods
         if self.allowed_methods.is_empty() {
-            cors = cors.allow_methods([
-                axum::http::Method::POST,
-                axum::http::Method::OPTIONS,
-            ]);
+            cors = cors.allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS]);
         } else {
             let methods: Vec<_> = self
                 .allowed_methods
@@ -314,10 +311,7 @@ impl Config {
             let api_key = match provider_cfg.resolve_api_key() {
                 Some(key) => key,
                 None => {
-                    eprintln!(
-                        "Warning: no API key for provider '{}', skipping",
-                        name
-                    );
+                    eprintln!("Warning: no API key for provider '{}', skipping", name);
                     continue;
                 }
             };
@@ -341,8 +335,10 @@ impl Config {
     pub fn build_redactor(&self) -> auvura_core::redactor::Redactor {
         use auvura_core::{
             detectors::{
-                credit_card::CreditCardDetector, email::EmailDetector,
-                ip::{Ipv4Detector, Ipv6Detector}, phone_number::PhoneNumberDetector,
+                credit_card::CreditCardDetector,
+                email::EmailDetector,
+                ip::{Ipv4Detector, Ipv6Detector},
+                phone_number::PhoneNumberDetector,
                 ssn::SSNDetector,
             },
             policy::PolicyBuilder,
@@ -467,10 +463,7 @@ api_key = "sk-ant-test"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.providers.len(), 2);
-        assert_eq!(
-            config.providers["openai"].api_key_env,
-            "OPENAI_API_KEY"
-        );
+        assert_eq!(config.providers["openai"].api_key_env, "OPENAI_API_KEY");
         assert_eq!(
             config.providers["anthropic"].api_key,
             Some("sk-ant-test".to_string())

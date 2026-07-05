@@ -146,7 +146,7 @@ async fn chat_completions(
         let provider_request = adapter.translate_request(&request);
 
         // Step 4: Forward to provider API
-        let url = format!("{}/chat/completions", adapter.base_url());
+        let url = format!("{}/{}", adapter.base_url(), adapter.endpoint_path());
         let headers = adapter.required_headers(api_key);
 
         let mut req_builder = state.http_client.post(&url);
@@ -312,7 +312,7 @@ async fn chat_completions_stream(
         obj.insert("stream".to_string(), Value::Bool(true));
     }
 
-    let url = format!("{}/chat/completions", adapter.base_url());
+    let url = format!("{}/{}", adapter.base_url(), adapter.endpoint_path());
     let headers = adapter.required_headers(api_key);
 
     let mut req_builder = state.http_client.post(&url);

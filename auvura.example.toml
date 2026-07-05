@@ -24,3 +24,12 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Countries are tried in order; the first match wins.
 # Default: ["US", "GB", "DE", "FR", "CA", "AU", "JP"]
 # phone_countries = ["US", "DE", "JP"]
+
+# CORS configuration (optional — disabled by default).
+# Required for browser-based SDK integrations.
+# [cors]
+# allowed_origins = ["https://app.example.com"]
+# allowed_methods = ["POST", "OPTIONS"]          # Default if omitted
+# allowed_headers = ["Content-Type", "Authorization"]  # Default if omitted
+# allow_credentials = false                       # Default if omitted
+# max_age = 3600                                  # Preflight cache seconds (default: none)

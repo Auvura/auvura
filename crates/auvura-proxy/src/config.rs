@@ -2,6 +2,8 @@ use clap::Parser;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
+use tower_http::cors::{AllowOrigin, Any};
 
 /// Auvura Proxy — provider-agnostic AI security layer
 #[derive(Parser, Debug)]
@@ -31,6 +33,9 @@ pub struct Config {
 
     #[serde(default)]
     pub policy: PolicyConfig,
+
+    #[serde(default)]
+    pub cors: CorsConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +112,107 @@ pub struct PolicyConfig {
     /// Allowlist terms that should never be redacted
     #[serde(default)]
     pub allowlist: Vec<String>,
+}
+
+/// CORS configuration for browser-based SDK integrations.
+/// When omitted or empty, CORS is disabled (no Access-Control headers sent).
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct CorsConfig {
+    /// Allowed origins (e.g., ["https://app.example.com"]).
+    /// Use ["*"] to allow all origins (not recommended for production).
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+
+    /// Allowed HTTP methods (e.g., ["GET", "POST", "OPTIONS"]).
+    /// Defaults to ["POST", "OPTIONS"] if empty.
+    #[serde(default)]
+    pub allowed_methods: Vec<String>,
+
+    /// Allowed request headers (e.g., ["Content-Type", "Authorization"]).
+    /// Defaults to ["Content-Type", "Authorization"] if empty.
+    #[serde(default)]
+    pub allowed_headers: Vec<String>,
+
+    /// Whether to allow credentials (cookies, auth headers).
+    #[serde(default)]
+    pub allow_credentials: bool,
+
+    /// Maximum age for preflight cache in seconds.
+    /// Defaults to 3600 (1 hour) if None.
+    #[serde(default)]
+    pub max_age: Option<u64>,
+}
+
+impl CorsConfig {
+    /// Returns true if CORS is configured (at least one origin is set).
+    pub fn is_enabled(&self) -> bool {
+        !self.allowed_origins.is_empty()
+    }
+
+    /// Build a CorsLayer from this config.
+    pub fn to_cors_layer(&self) -> Option<tower_http::cors::CorsLayer> {
+        if !self.is_enabled() {
+            return None;
+        }
+
+        let mut cors = tower_http::cors::CorsLayer::new();
+
+        // Origins
+        if self.allowed_origins.iter().any(|o| o == "*") {
+            cors = cors.allow_origin(Any);
+        } else {
+            let origins: Vec<_> = self
+                .allowed_origins
+                .iter()
+                .filter_map(|o| o.parse().ok())
+                .collect();
+            if !origins.is_empty() {
+                cors = cors.allow_origin(AllowOrigin::list(origins));
+            }
+        }
+
+        // Methods
+        if self.allowed_methods.is_empty() {
+            cors = cors.allow_methods([
+                axum::http::Method::POST,
+                axum::http::Method::OPTIONS,
+            ]);
+        } else {
+            let methods: Vec<_> = self
+                .allowed_methods
+                .iter()
+                .filter_map(|m| m.parse().ok())
+                .collect();
+            cors = cors.allow_methods(methods);
+        }
+
+        // Headers
+        if self.allowed_headers.is_empty() {
+            cors = cors.allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::AUTHORIZATION,
+            ]);
+        } else {
+            let headers: Vec<_> = self
+                .allowed_headers
+                .iter()
+                .filter_map(|h| h.parse().ok())
+                .collect();
+            cors = cors.allow_headers(headers);
+        }
+
+        // Credentials
+        if self.allow_credentials {
+            cors = cors.allow_credentials(true);
+        }
+
+        // Max age
+        if let Some(seconds) = self.max_age {
+            cors = cors.max_age(Duration::from_secs(seconds));
+        }
+
+        Some(cors)
+    }
 }
 
 impl Config {
@@ -397,5 +503,56 @@ phone_countries = ["DE"]
         // so we test that intl prefix numbers still work
         let result = redactor.redact("Intl: +12025550123");
         assert_ne!(result, "Intl: +12025550123");
+    }
+
+    #[test]
+    fn test_parse_cors_config() {
+        let toml_str = r#"
+[cors]
+allowed_origins = ["https://app.example.com", "https://admin.example.com"]
+allowed_methods = ["POST", "OPTIONS"]
+allowed_headers = ["Content-Type", "Authorization"]
+allow_credentials = true
+max_age = 7200
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.cors.is_enabled());
+        assert_eq!(config.cors.allowed_origins.len(), 2);
+        assert_eq!(config.cors.allowed_methods, vec!["POST", "OPTIONS"]);
+        assert_eq!(
+            config.cors.allowed_headers,
+            vec!["Content-Type", "Authorization"]
+        );
+        assert!(config.cors.allow_credentials);
+        assert_eq!(config.cors.max_age, Some(7200));
+    }
+
+    #[test]
+    fn test_cors_disabled_by_default() {
+        let config = Config::default();
+        assert!(!config.cors.is_enabled());
+        assert!(config.cors.to_cors_layer().is_none());
+    }
+
+    #[test]
+    fn test_cors_wildcard_origin() {
+        let toml_str = r#"
+[cors]
+allowed_origins = ["*"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.cors.is_enabled());
+        assert!(config.cors.to_cors_layer().is_some());
+    }
+
+    #[test]
+    fn test_cors_empty_origins_disabled() {
+        let toml_str = r#"
+[cors]
+allowed_methods = ["POST"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.cors.is_enabled());
+        assert!(config.cors.to_cors_layer().is_none());
     }
 }

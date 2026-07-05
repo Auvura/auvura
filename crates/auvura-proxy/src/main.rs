@@ -34,7 +34,8 @@ async fn main() {
         context_store: Arc::new(dashmap::DashMap::new()),
     });
 
-    let app = auvura_proxy::app_router(app_state);
+    let cors = config.cors.to_cors_layer();
+    let app = auvura_proxy::app_router(app_state, cors);
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port)
         .parse()

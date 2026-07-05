@@ -182,6 +182,23 @@ let detector = PhoneNumberDetector::with_countries(vec!["DE".into(), "FR".into()
 
 Numbers with international prefix (`+`) are always validated via phonelib regardless of the country list.
 
+### CORS Configuration
+
+CORS support is available for browser-based SDK integrations. It is **disabled by default** — when no `[cors]` section is present, no `Access-Control-*` headers are sent.
+
+In `auvura.toml`:
+
+```toml
+[cors]
+allowed_origins = ["https://app.example.com"]  # Required to enable CORS
+allowed_methods = ["POST", "OPTIONS"]          # Default if omitted
+allowed_headers = ["Content-Type", "Authorization"]  # Default if omitted
+allow_credentials = false                       # Default if omitted
+max_age = 3600                                  # Preflight cache seconds (optional)
+```
+
+Use `allowed_origins = ["*"]` to allow all origins (not recommended for production).
+
 ## How It Works
 
 1. **Detection**: Regex-based detectors find PII patterns in text

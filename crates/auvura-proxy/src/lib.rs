@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 pub type ProviderMap = HashMap<String, (Box<dyn provider::ProviderAdapter>, String)>;
@@ -103,12 +104,18 @@ impl Stream for StreamCleanup {
     }
 }
 
-/// Build the axum Router with all routes
-pub fn app_router(state: Arc<AppConfig>) -> Router {
-    Router::new()
+/// Build the axum Router with all routes and optional CORS layer
+pub fn app_router(state: Arc<AppConfig>, cors: Option<CorsLayer>) -> Router {
+    let mut router = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
-        .with_state(state)
+        .with_state(state);
+
+    if let Some(cors) = cors {
+        router = router.layer(cors);
+    }
+
+    router
 }
 
 pub async fn chat_completions(
@@ -564,7 +571,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_completions_unknown_provider() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config);
+        let app = app_router(config, None);
 
         let request = serde_json::json!({
             "model": "gpt-4",
@@ -610,7 +617,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config);
+        let app = app_router(config, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -643,7 +650,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_unknown_provider_returns_sse_error() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config);
+        let app = app_router(config, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -690,7 +697,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config);
+        let app = app_router(config, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -727,5 +734,69 @@ mod tests {
         assert!(upstream_body.get("_auvura_session").is_none(), "_auvura_session leaked to upstream");
         // Standard fields must still be present
         assert_eq!(upstream_body["model"], "test-model");
+    }
+
+    // ===== CORS integration tests =====
+
+    #[tokio::test]
+    async fn test_cors_preflight_returns_headers() {
+        use tower_http::cors::CorsLayer;
+
+        let config = test_config_with_url("http://localhost:0");
+        let cors = CorsLayer::new()
+            .allow_origin(["https://app.example.com".parse().unwrap()])
+            .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
+            .allow_headers([axum::http::header::CONTENT_TYPE]);
+        let app = app_router(config, Some(cors));
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("OPTIONS")
+                .uri("/v1/chat/completions")
+                .header("Origin", "https://app.example.com")
+                .header("Access-Control-Request-Method", "POST")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let headers = response.headers();
+        assert!(
+            headers.contains_key("access-control-allow-origin"),
+            "missing Access-Control-Allow-Origin header"
+        );
+        assert_eq!(
+            headers.get("access-control-allow-origin").unwrap(),
+            "https://app.example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cors_no_layer_no_headers() {
+        let config = test_config_with_url("http://localhost:0");
+        let app = app_router(config, None);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("OPTIONS")
+                .uri("/v1/chat/completions")
+                .header("Origin", "https://app.example.com")
+                .header("Access-Control-Request-Method", "POST")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Without CORS layer, no Access-Control headers should be present
+        let headers = response.headers();
+        assert!(
+            !headers.contains_key("access-control-allow-origin"),
+            "Access-Control-Allow-Origin should not be present without CORS config"
+        );
     }
 }

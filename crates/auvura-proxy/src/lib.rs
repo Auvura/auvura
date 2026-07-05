@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod provider;
+pub mod rate_limit;
 
 use auvura_core::{
     detector::PiiDetector,
@@ -33,6 +34,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower_http::cors::CorsLayer;
+use tower_http::limit::RequestBodyLimitLayer;
 use uuid::Uuid;
 
 pub type ProviderMap = HashMap<String, (Box<dyn provider::ProviderAdapter>, String)>;
@@ -104,13 +106,31 @@ impl Stream for StreamCleanup {
     }
 }
 
-/// Build the axum Router with all routes and optional CORS layer
-pub fn app_router(state: Arc<AppConfig>, cors: Option<CorsLayer>) -> Router {
+/// Build the axum Router with all routes and optional middleware layers
+pub fn app_router(
+    state: Arc<AppConfig>,
+    cors: Option<CorsLayer>,
+    rate_limiter: Option<rate_limit::RateLimiter>,
+    max_body_bytes: usize,
+) -> Router {
     let mut router = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(state);
 
+    // Request body size limit
+    if max_body_bytes > 0 {
+        router = router.layer(RequestBodyLimitLayer::new(max_body_bytes));
+    }
+
+    // Rate limiting (per-IP via X-Forwarded-For or connecting IP)
+    if let Some(limiter) = rate_limiter {
+        router = router.layer(rate_limit::RateLimitLayer {
+            limiter,
+        });
+    }
+
+    // CORS (applied last so it wraps everything)
     if let Some(cors) = cors {
         router = router.layer(cors);
     }
@@ -571,7 +591,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_completions_unknown_provider() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None);
+        let app = app_router(config, None, None, 0);
 
         let request = serde_json::json!({
             "model": "gpt-4",
@@ -617,7 +637,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None);
+        let app = app_router(config, None, None, 0);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -650,7 +670,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_unknown_provider_returns_sse_error() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None);
+        let app = app_router(config, None, None, 0);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -697,7 +717,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None);
+        let app = app_router(config, None, None, 0);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -747,7 +767,7 @@ mod tests {
             .allow_origin(["https://app.example.com".parse().unwrap()])
             .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
             .allow_headers([axum::http::header::CONTENT_TYPE]);
-        let app = app_router(config, Some(cors));
+        let app = app_router(config, Some(cors), None, 0);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -777,7 +797,7 @@ mod tests {
     #[tokio::test]
     async fn test_cors_no_layer_no_headers() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None);
+        let app = app_router(config, None, None, 0);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -798,5 +818,169 @@ mod tests {
             !headers.contains_key("access-control-allow-origin"),
             "Access-Control-Allow-Origin should not be present without CORS config"
         );
+    }
+
+    // ===== Rate limiting integration tests =====
+
+    #[tokio::test]
+    async fn test_rate_limit_rejects_over_limit() {
+        use crate::rate_limit::RateLimiter;
+
+        let config = test_config_with_url("http://localhost:0");
+        let limiter = RateLimiter::new(2, 2); // 2 req/s, burst of 2
+        let app = app_router(config, None, Some(limiter), 0);
+
+        let make_request = || {
+            let app = app.clone();
+            async move {
+                tower::ServiceExt::oneshot(
+                    app,
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/v1/chat/completions")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", "10.0.0.1:1234")
+                        .body(axum::body::Body::from(
+                            serde_json::to_vec(&serde_json::json!({
+                                "model": "gpt-4",
+                                "messages": [{"role": "user", "content": "Hi"}],
+                                "provider": "nonexistent"
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // First two should succeed (burst)
+        let r1 = make_request().await;
+        assert_ne!(r1.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+
+        let r2 = make_request().await;
+        assert_ne!(r2.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+
+        // Third should be rate limited
+        let r3 = make_request().await;
+        assert_eq!(r3.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_different_ips_independent() {
+        use crate::rate_limit::RateLimiter;
+
+        let config = test_config_with_url("http://localhost:0");
+        let limiter = RateLimiter::new(1, 1); // 1 req/s, burst of 1
+        let app = app_router(config, None, Some(limiter), 0);
+
+        let make_request = |ip: &str| {
+            let app = app.clone();
+            let ip = ip.to_string();
+            async move {
+                tower::ServiceExt::oneshot(
+                    app,
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/v1/chat/completions")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", format!("{}:1234", ip))
+                        .body(axum::body::Body::from(
+                            serde_json::to_vec(&serde_json::json!({
+                                "model": "gpt-4",
+                                "messages": [{"role": "user", "content": "Hi"}],
+                                "provider": "nonexistent"
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // IP1 uses its burst
+        let r1 = make_request("10.0.0.1").await;
+        assert_ne!(r1.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+
+        // IP1 exhausted
+        let r2 = make_request("10.0.0.1").await;
+        assert_eq!(r2.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+
+        // IP2 still has its own burst
+        let r3 = make_request("10.0.0.2").await;
+        assert_ne!(r3.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // ===== Request size limit integration tests =====
+
+    #[tokio::test]
+    async fn test_request_size_limit_rejects_oversized() {
+        let config = test_config_with_url("http://localhost:0");
+        // 100 byte limit
+        let app = app_router(config, None, None, 100);
+
+        // Create a request body larger than 100 bytes
+        let large_body = "x".repeat(200);
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(large_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn test_request_size_limit_allows_small() {
+        let config = test_config_with_url("http://localhost:0");
+        // 10MB limit
+        let app = app_router(config, None, None, 10 * 1024 * 1024);
+
+        let small_body = r#"{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}],"provider":"nonexistent"}"#;
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(small_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Should not be payload too large (will be NOT_FOUND since provider doesn't exist)
+        assert_ne!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn test_no_size_limit_when_zero() {
+        let config = test_config_with_url("http://localhost:0");
+        // 0 = no limit
+        let app = app_router(config, None, None, 0);
+
+        let large_body = "x".repeat(1000);
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(large_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_ne!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

@@ -10,6 +10,7 @@ repository.workspace = true
 auvura-core = { path = "../auvura-core" }
 axum = { version = "0.8", features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true }
 tower-http = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde.workspace = true

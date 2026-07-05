@@ -199,6 +199,31 @@ max_age = 3600                                  # Preflight cache seconds (optio
 
 Use `allowed_origins = ["*"]` to allow all origins (not recommended for production).
 
+### Rate Limiting
+
+Per-IP rate limiting protects against abuse. Disabled by default.
+
+In `auvura.toml`:
+
+```toml
+[rate_limit]
+requests_per_second = 10    # Max requests per second per IP
+burst_size = 10             # Max concurrent requests in a burst
+```
+
+Uses a token bucket algorithm: each IP gets a bucket that refills at `requests_per_second` tokens/sec, up to `burst_size` capacity. Over-limit requests receive `429 Too Many Requests`.
+
+### Request Size Limits
+
+Maximum request body size defaults to **10 MB**. Set to `0` to disable.
+
+```toml
+[request_limit]
+max_body_bytes = 10485760   # 10 MB (default)
+```
+
+Oversized payloads receive `413 Payload Too Large`.
+
 ## How It Works
 
 1. **Detection**: Regex-based detectors find PII patterns in text

@@ -189,6 +189,7 @@ Test coverage includes:
 - [x] SSE streaming endpoint with real-time PII reconstruction
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
 - [x] IPv4/IPv6 detectors
+- [x] Aho-Corasick multi-pattern optimization for `MultiDetector`
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [ ] CLI binary
 - [ ] Quoted email local parts (V2)

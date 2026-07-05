@@ -131,6 +131,23 @@ impl PiiDetector for PhoneNumberDetector {
 
         detections
     }
+
+    /// No reliable literal anchor — phone numbers vary widely in format.
+    /// Falls back to full-text regex scan.
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect(window)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

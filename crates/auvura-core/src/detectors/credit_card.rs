@@ -174,6 +174,22 @@ impl PiiDetector for CreditCardDetector {
         detections.sort_by_key(|d| d.start);
         detections
     }
+
+    /// Space or dash between digits is the anchor for credit card patterns
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        vec![" -", " "]
+    }
+
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect_with_validation(window, true)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

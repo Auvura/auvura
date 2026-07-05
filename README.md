@@ -29,7 +29,7 @@ auvura/
 │   │           ├── phone_number.rs
 │   │           ├── ssn.rs
 │   │           └── credit_card.rs
-│   ├── auvura-cli/          # CLI binary (placeholder)
+│   ├── auvura-cli/          # CLI binary (redact, validate, serve)
 │   └── auvura-proxy/        # Proxy server for AI API redaction
 │       └── src/
 │           ├── main.rs        # Axum server with /v1/chat/completions
@@ -83,6 +83,45 @@ println!("{}", result);
 let detector = detectors::PhoneNumberDetector::with_countries(
     vec!["DE".into(), "FR".into(), "JP".into()]
 );
+```
+
+### CLI Tool
+
+```bash
+# Build the CLI
+cargo build --package auvura-cli
+
+# Redact PII from a string
+auvura redact --text "Contact john@example.com or call 123-456-7890"
+# Output: Contact ████.███@███████.com or call ███-███-████
+
+# Redact PII from a file
+auvura redact --file document.txt
+
+# Redact from stdin (pipe)
+echo "My SSN is 123-45-6789" | auvura redact
+
+# Redact with JSON output
+auvura redact --text "Email: test@example.com" --format json
+
+# Validate (detect PII without redacting)
+auvura validate --text "Send docs to alice@company.com"
+# Output:
+# Found 1 PII detection(s):
+#   email at byte 15..35: "alice@company.com"
+#
+# Redacted output:
+# Send docs to ████@███████.com
+
+# Validate with JSON output
+auvura validate --text "SSN: 123-45-6789" --format json
+
+# Start the proxy server
+auvura serve
+auvura serve --address 0.0.0.0 --port 8080
+
+# Use a custom config file
+auvura --config my-config.toml redact --text "Hello"
 ```
 
 ### Proxy Server
@@ -250,7 +289,7 @@ Oversized payloads receive `413 Payload Too Large`.
 ## Testing
 
 ```bash
-# Run all tests (127+ tests)
+# Run all tests (200+ tests)
 cargo test --workspace
 
 # Run proxy tests only (unit + integration)
@@ -277,7 +316,7 @@ Test coverage includes:
 - [x] Aho-Corasick multi-pattern optimization for `MultiDetector`
 - [x] Proxy configuration via TOML file + CLI args
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
-- [ ] CLI binary
+- [x] CLI binary (`redact`, `validate`, `serve`)
 - [ ] Quoted email local parts (V2)
 - [ ] Performance benchmarking
 

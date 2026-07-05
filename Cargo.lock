@@ -113,6 +113,18 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "auvura-cli"
 version = "0.1.0"
+dependencies = [
+ "auvura-core",
+ "auvura-proxy",
+ "axum",
+ "clap",
+ "dashmap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+]
 
 [[package]]
 name = "auvura-core"

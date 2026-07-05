@@ -1,0 +1,21 @@
+# Auvura Proxy Configuration
+# Copy this file to auvura.toml and customize.
+
+[server]
+host = "127.0.0.1"
+port = 3000
+
+# Provider API keys.
+# Use `api_key_env` to read from an environment variable (recommended),
+# or `api_key` to set the key directly (not recommended for production).
+[providers.openai]
+api_key_env = "OPENAI_API_KEY"
+
+[providers.anthropic]
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Redaction policy (optional — defaults to detecting all core PII types).
+# [policy]
+# enabled_types = ["email", "phone", "ssn", "credit_card", "ipv4", "ipv6"]
+# blocklist = ["CONFIDENTIAL"]
+# allowlist = ["Apple Inc"]

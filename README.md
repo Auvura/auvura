@@ -33,6 +33,7 @@ auvura/
 │   └── auvura-proxy/        # Proxy server for AI API redaction
 │       └── src/
 │           ├── main.rs        # Axum server with /v1/chat/completions
+│           ├── config.rs      # TOML config + CLI arg parsing
 │           └── provider.rs     # Provider-agnostic adapter system
 └── Cargo.toml                   # Workspace configuration
 ```
@@ -81,12 +82,21 @@ println!("{}", result);
 ### Proxy Server
 
 ```bash
-# Set API keys
+# Copy the example config
+cp auvura.example.toml auvura.toml
+
+# Set API keys (or configure in auvura.toml)
 export OPENAI_API_KEY="your-key"
 export ANTHROPIC_API_KEY="your-key"
 
-# Run proxy
+# Run with default config (auvura.toml)
 cargo run --package auvura-proxy
+
+# Run with custom config and port
+cargo run --package auvura-proxy -- --config my-config.toml --port 8080
+
+# Run listening on all interfaces
+cargo run --package auvura-proxy -- --address 0.0.0.0 --port 9090
 
 # Use with any OpenAI-compatible SDK
 curl http://localhost:3000/v1/chat/completions \
@@ -190,6 +200,7 @@ Test coverage includes:
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
 - [x] IPv4/IPv6 detectors
 - [x] Aho-Corasick multi-pattern optimization for `MultiDetector`
+- [x] Proxy configuration via TOML file + CLI args
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [ ] CLI binary
 - [ ] Quoted email local parts (V2)

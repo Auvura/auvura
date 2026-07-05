@@ -138,8 +138,15 @@ impl MultiDetector {
             .map(|m| (self.anchor_detector_idx[m.pattern()], m.start(), m.end()))
             .collect();
 
+        // If no anchors matched, still run detectors that have no anchor patterns
         if anchor_matches.is_empty() {
-            return Vec::new();
+            let mut detections = Vec::new();
+            for det in &self.detectors {
+                if det.anchor_patterns().is_empty() {
+                    detections.extend(det.detect(text));
+                }
+            }
+            return Self::resolve_overlaps(detections);
         }
 
         // Group anchor positions by detector index, expand to candidate windows
@@ -204,8 +211,16 @@ impl MultiDetector {
             .map(|m| (self.anchor_detector_idx[m.pattern()], m.start(), m.end()))
             .collect();
 
+        // If no anchors matched, still run detectors that have no anchor patterns
+        // (e.g. PhoneNumberDetector which falls back to full-text regex scan)
         if anchor_matches.is_empty() {
-            return Vec::new();
+            let mut detections = Vec::new();
+            for det in &self.detectors {
+                if det.anchor_patterns().is_empty() {
+                    detections.extend(det.detect_with_validation(text, validate));
+                }
+            }
+            return Self::resolve_overlaps(detections);
         }
 
         let mut candidate_regions: Vec<Vec<AnchorRegion>> =

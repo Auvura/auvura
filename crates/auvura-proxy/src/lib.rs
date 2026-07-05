@@ -15,7 +15,11 @@ use auvura_core::{
 };
 use axum::{
     extract::{Json, State},
-    response::sse::{Event, Sse},
+    http::StatusCode,
+    response::{
+        sse::{Event, Sse},
+        IntoResponse,
+    },
     routing::post,
     Router,
 };
@@ -86,7 +90,7 @@ pub fn app_router(state: Arc<AppConfig>) -> Router {
 pub async fn chat_completions(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
-) -> Json<Value> {
+) -> (StatusCode, Json<Value>) {
     // Collect ALL originals from messages containing PII
     let mut originals: Vec<String> = Vec::new();
 
@@ -157,31 +161,31 @@ pub async fn chat_completions(
                         }
                     }
 
-                    Json(standard_response)
+                    (StatusCode::OK, Json(standard_response))
                 } else {
-                    Json(Value::Object(serde_json::Map::from_iter(vec![(
+                    (StatusCode::BAD_GATEWAY, Json(Value::Object(serde_json::Map::from_iter(vec![(
                         "error".to_string(),
                         Value::String("Failed to parse provider response".to_string()),
-                    )])))
+                    )]))))
                 }
             }
-            Err(e) => Json(Value::Object(serde_json::Map::from_iter(vec![(
+            Err(e) => (StatusCode::BAD_GATEWAY, Json(Value::Object(serde_json::Map::from_iter(vec![(
                 "error".to_string(),
                 Value::String(format!("Provider request failed: {}", e)),
-            )]))),
+            )])))),
         }
     } else {
-        Json(Value::Object(serde_json::Map::from_iter(vec![(
+        (StatusCode::NOT_FOUND, Json(Value::Object(serde_json::Map::from_iter(vec![(
             "error".to_string(),
             Value::String(format!("Unknown provider: {}", provider_name)),
-        )])))
+        )]))))
     }
 }
 
 pub async fn chat_completions_stream(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
-) -> impl axum::response::IntoResponse {
+) -> axum::response::Response {
     use futures_util::StreamExt;
 
     let mut token_map: HashMap<String, String> = HashMap::new();
@@ -249,13 +253,10 @@ pub async fn chat_completions_stream(
         .to_lowercase();
 
     let Some((adapter, api_key)) = state.providers.get(&provider_name) else {
-        let error_msg = format!("Unknown provider: {}", provider_name);
-        let stream = futures_util::stream::iter(vec![Ok(Event::default().data(error_msg))]);
-        return Sse::new(StreamCleanup::new(
-            stream,
-            state.context_store.clone(),
-            "".into(),
-        ));
+        let error_body = serde_json::json!({
+            "error": format!("Unknown provider: {}", provider_name)
+        });
+        return (StatusCode::NOT_FOUND, Json(error_body)).into_response();
     };
 
     let mut provider_request = adapter.translate_request(&request);
@@ -273,6 +274,15 @@ pub async fn chat_completions_stream(
 
     match req_builder.json(&provider_request).send().await {
         Ok(response) => {
+            // Check provider response status before streaming
+            let status = response.status();
+            if status.is_client_error() || status.is_server_error() {
+                let error_body = serde_json::json!({
+                    "error": format!("Provider returned HTTP {}", status.as_u16())
+                });
+                return (StatusCode::BAD_GATEWAY, Json(error_body)).into_response();
+            }
+
             let context_store = state.context_store.clone();
 
             let reverse_map: HashMap<String, String> = token_map.into_iter().collect();
@@ -308,15 +318,13 @@ pub async fn chat_completions_stream(
                 state.context_store.clone(),
                 cleanup_id,
             ))
+            .into_response()
         }
         Err(e) => {
-            let error_msg = format!("Provider request failed: {}", e);
-            let stream = futures_util::stream::iter(vec![Ok(Event::default().data(error_msg))]);
-            Sse::new(StreamCleanup::new(
-                stream,
-                state.context_store.clone(),
-                "".into(),
-            ))
+            let error_body = serde_json::json!({
+                "error": format!("Provider request failed: {}", e)
+            });
+            (StatusCode::BAD_GATEWAY, Json(error_body)).into_response()
         }
     }
 }
@@ -502,7 +510,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
@@ -581,7 +589,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();

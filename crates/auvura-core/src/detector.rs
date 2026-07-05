@@ -1,4 +1,5 @@
 use crate::types::PiiType;
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use zeroize::Zeroize;
 
 /// Detection result with memory safety guarantees
@@ -42,33 +43,228 @@ pub trait PiiDetector: Send + Sync {
         let _ = validate;
         self.detect(text)
     }
+
+    /// Returns literal anchor patterns for Aho-Corasick pre-filtering.
+    /// These are substrings that MUST be present in text containing this PII type.
+    /// Default: empty (no optimization, full regex scan).
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    /// Detect PII within a window of text, adjusting offsets by `window_start`.
+    /// Used by MultiDetector for Aho-Corasick-optimized scanning.
+    /// Default: delegates to detect() on the window (word boundaries may be
+    /// affected by window truncation — detectors with boundary-sensitive patterns
+    /// should override this).
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect(window)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
+            })
+            .collect()
+    }
+}
+
+/// Anchor-based candidate region for a detector
+struct AnchorRegion {
+    start: usize,
+    end: usize,
 }
 
 /// Composite detector for single-pass scanning
 pub struct MultiDetector {
     detectors: Vec<Box<dyn PiiDetector>>,
+    /// Pre-built Aho-Corasick automaton for anchor patterns.
+    /// `anchor_detector_idx[i]` maps automaton pattern index `i` to detector index.
+    ac: Option<AhoCorasick>,
+    anchor_detector_idx: Vec<usize>,
 }
 
 impl MultiDetector {
     pub fn new(detectors: Vec<Box<dyn PiiDetector>>) -> Self {
-        Self { detectors }
+        // Build Aho-Corasick automaton from all detector anchor patterns
+        let mut patterns: Vec<&str> = Vec::new();
+        let mut detector_idx: Vec<usize> = Vec::new();
+
+        for (i, det) in detectors.iter().enumerate() {
+            for pattern in det.anchor_patterns() {
+                patterns.push(pattern);
+                detector_idx.push(i);
+            }
+        }
+
+        let ac = if !patterns.is_empty() {
+            Some(
+                AhoCorasickBuilder::new()
+                    .match_kind(MatchKind::LeftmostFirst)
+                    .build(&patterns)
+                    .expect("Aho-Corasick patterns are valid"),
+            )
+        } else {
+            None
+        };
+
+        Self {
+            detectors,
+            ac,
+            anchor_detector_idx: detector_idx,
+        }
     }
 
-    /// Single-pass detection using Aho-Corasick for efficiency
-    /// (Implementation detail – will use aho-corasick crate internally)
+    /// Single-pass detection using Aho-Corasick for efficiency.
+    ///
+    /// Strategy:
+    /// 1. If anchors are defined, build Aho-Corasick automaton once.
+    /// 2. Scan text once to find all anchor positions (O(n + m + z)).
+    /// 3. For each detector, extract candidate windows around its anchors.
+    /// 4. Run detector's regex only on reduced candidate text.
+    /// 5. Sort and resolve overlaps.
     pub fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
-        // Phase 2: Optimize with Aho-Corasick multi-pattern matching
-        // Phase 1: Simple loop over detectors (correctness first)
-        let mut detections: Vec<Detection> = Vec::new();
-        for detector in &self.detectors {
-            detections.extend(detector.detect(text));
+        if text.is_empty() {
+            return Vec::new();
         }
-        // Sort and resolve overlaps (critical for correct redaction)
+
+        let Some(ref ac) = self.ac else {
+            // No anchors — fall back to naive loop
+            return self.detect_naive(text);
+        };
+
+        // Single Aho-Corasick pass to find all anchor matches
+        let anchor_matches: Vec<(usize, usize, usize)> = ac
+            .find_iter(text)
+            .map(|m| (self.anchor_detector_idx[m.pattern()], m.start(), m.end()))
+            .collect();
+
+        if anchor_matches.is_empty() {
+            return Vec::new();
+        }
+
+        // Group anchor positions by detector index, expand to candidate windows
+        let mut candidate_regions: Vec<Vec<AnchorRegion>> =
+            (0..self.detectors.len()).map(|_| Vec::new()).collect();
+        for &(det_idx, start, end) in &anchor_matches {
+            // Expand window: 64 bytes before (for local part, area code, etc.)
+            // and 64 bytes after (for domain, remaining digits, etc.)
+            let win_start = start.saturating_sub(64);
+            let win_end = std::cmp::min(text.len(), end + 64);
+
+            // Merge overlapping windows for the same detector
+            if let Some(last) = candidate_regions[det_idx].last_mut() {
+                if win_start <= last.end {
+                    last.end = std::cmp::max(last.end, win_end);
+                    continue;
+                }
+            }
+            candidate_regions[det_idx].push(AnchorRegion {
+                start: win_start,
+                end: win_end,
+            });
+        }
+
+        // Run each detector on its candidate windows (or full text if no anchors)
+        let mut detections: Vec<Detection> = Vec::new();
+        for (det_idx, det) in self.detectors.iter().enumerate() {
+            if candidate_regions[det_idx].is_empty() {
+                // If the detector has anchor patterns but none were found, skip it.
+                // If the detector has NO anchor patterns, run on full text as fallback.
+                if !det.anchor_patterns().is_empty() {
+                    continue;
+                }
+                detections.extend(det.detect(text));
+                continue;
+            }
+
+            for region in &candidate_regions[det_idx] {
+                if region.start >= region.end || region.end > text.len() {
+                    continue;
+                }
+                let window = &text[region.start..region.end];
+                detections.extend(det.detect_in_window(window, region.start));
+            }
+        }
+
         Self::resolve_overlaps(detections)
     }
 
     /// Detect with optional validation bypass
     pub fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+
+        let Some(ref ac) = self.ac else {
+            return self.detect_naive_with_validation(text, validate);
+        };
+
+        let anchor_matches: Vec<(usize, usize, usize)> = ac
+            .find_iter(text)
+            .map(|m| (self.anchor_detector_idx[m.pattern()], m.start(), m.end()))
+            .collect();
+
+        if anchor_matches.is_empty() {
+            return Vec::new();
+        }
+
+        let mut candidate_regions: Vec<Vec<AnchorRegion>> =
+            (0..self.detectors.len()).map(|_| Vec::new()).collect();
+        for &(det_idx, start, end) in &anchor_matches {
+            let win_start = start.saturating_sub(64);
+            let win_end = std::cmp::min(text.len(), end + 64);
+
+            if let Some(last) = candidate_regions[det_idx].last_mut() {
+                if win_start <= last.end {
+                    last.end = std::cmp::max(last.end, win_end);
+                    continue;
+                }
+            }
+            candidate_regions[det_idx].push(AnchorRegion {
+                start: win_start,
+                end: win_end,
+            });
+        }
+
+        let mut detections: Vec<Detection> = Vec::new();
+        for (det_idx, det) in self.detectors.iter().enumerate() {
+            if candidate_regions[det_idx].is_empty() {
+                if !det.anchor_patterns().is_empty() {
+                    continue;
+                }
+                detections.extend(det.detect_with_validation(text, validate));
+                continue;
+            }
+
+            for region in &candidate_regions[det_idx] {
+                if region.start >= region.end || region.end > text.len() {
+                    continue;
+                }
+                let window = &text[region.start..region.end];
+                // Use detect_with_validation on the window, adjusting offsets
+                let window_detections = det.detect_with_validation(window, validate);
+                detections.extend(window_detections.into_iter().map(|mut d| {
+                    d.start += region.start;
+                    d.end += region.start;
+                    d
+                }));
+            }
+        }
+
+        Self::resolve_overlaps(detections)
+    }
+
+    /// Fallback: naive loop over detectors (no Aho-Corasick optimization)
+    fn detect_naive(&self, text: &str) -> Vec<Detection> {
+        let mut detections: Vec<Detection> = Vec::new();
+        for detector in &self.detectors {
+            detections.extend(detector.detect(text));
+        }
+        Self::resolve_overlaps(detections)
+    }
+
+    /// Fallback: naive loop with validation bypass
+    fn detect_naive_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         let mut detections: Vec<Detection> = Vec::new();
         for detector in &self.detectors {
             detections.extend(detector.detect_with_validation(text, validate));
@@ -163,6 +359,9 @@ mod tests {
                 vec![]
             }
         }
+        fn anchor_patterns(&self) -> Vec<&'static str> {
+            vec!["@"]
+        }
     }
 
     #[test]
@@ -227,5 +426,36 @@ mod tests {
         assert!(pii_priority(PiiType::Ssn) > pii_priority(PiiType::CreditCard));
         assert!(pii_priority(PiiType::CreditCard) > pii_priority(PiiType::PhoneNumber));
         assert!(pii_priority(PiiType::PhoneNumber) > pii_priority(PiiType::Email));
+    }
+
+    #[test]
+    fn test_aho_corasick_finds_anchors() {
+        use crate::detectors::email::EmailDetector;
+        let detectors: Vec<Box<dyn PiiDetector>> = vec![Box::new(EmailDetector::new())];
+        let multi = MultiDetector::new(detectors);
+
+        let detections = multi.detect("contact john@example.com or jane@test.org");
+        assert_eq!(detections.len(), 2);
+        assert_eq!(detections[0].original, "john@example.com");
+        assert_eq!(detections[1].original, "jane@test.org");
+    }
+
+    #[test]
+    fn test_aho_corasick_no_anchors_no_work() {
+        // Detector with no anchor patterns falls back to naive
+        struct NoAnchorDetector;
+        impl PiiDetector for NoAnchorDetector {
+            fn pii_type(&self) -> PiiType {
+                PiiType::Other("test")
+            }
+            fn detect<'a>(&self, _text: &'a str) -> Vec<Detection> {
+                vec![]
+            }
+        }
+
+        let detectors: Vec<Box<dyn PiiDetector>> = vec![Box::new(NoAnchorDetector)];
+        let multi = MultiDetector::new(detectors);
+        assert!(multi.ac.is_none());
+        assert!(multi.detect("no pii here").is_empty());
     }
 }

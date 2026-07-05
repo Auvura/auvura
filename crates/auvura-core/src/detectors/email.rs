@@ -62,6 +62,22 @@ impl PiiDetector for EmailDetector {
             })
             .collect()
     }
+
+    /// `@` is the definitive anchor for email addresses
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        vec!["@"]
+    }
+
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect(window)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

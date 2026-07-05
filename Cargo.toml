@@ -28,3 +28,6 @@ regex = "1.12.3"
 
 # Data validation
 phonelib = "1.0.3"
+
+# Text matching
+aho-corasick = "1.1"

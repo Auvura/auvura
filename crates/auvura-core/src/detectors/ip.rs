@@ -60,6 +60,22 @@ impl PiiDetector for Ipv4Detector {
             })
             .collect()
     }
+
+    /// Dot-separated digits is the anchor for IPv4 (e.g., `192.168.`)
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        vec!["."]
+    }
+
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect_with_validation(window, true)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
+            })
+            .collect()
+    }
 }
 
 /// Detects IPv6 addresses (colon-separated hex notation)
@@ -138,6 +154,22 @@ impl PiiDetector for Ipv6Detector {
                 } else {
                     None
                 }
+            })
+            .collect()
+    }
+
+    /// Colon is the anchor for IPv6 addresses
+    fn anchor_patterns(&self) -> Vec<&'static str> {
+        vec![":"]
+    }
+
+    fn detect_in_window(&self, window: &str, window_start: usize) -> Vec<Detection> {
+        self.detect_with_validation(window, true)
+            .into_iter()
+            .map(|mut d| {
+                d.start += window_start;
+                d.end += window_start;
+                d
             })
             .collect()
     }

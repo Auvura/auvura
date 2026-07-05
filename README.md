@@ -85,6 +85,39 @@ let detector = detectors::PhoneNumberDetector::with_countries(
 );
 ```
 
+#### Policy Serialization
+
+`RedactionPolicy` supports serialization to/from JSON, TOML, or any serde-compatible format via `RedactionPolicyConfig`:
+
+```rust
+use auvura_core::policy::{RedactionPolicy, RedactionPolicyConfig};
+
+// Create a policy
+let policy = RedactionPolicy::builder()
+    .disable(PiiType::Ssn)
+    .with_blocklist(vec!["SECRET"])
+    .with_allowlist(vec!["Apple"])
+    .build();
+
+// Serialize to config
+let config = policy.serialize();
+
+// Convert to JSON
+let json = serde_json::to_string_pretty(&config).unwrap();
+println!("{}", json);
+// {
+//   "enabled_types": ["email", "phone_number", "credit_card", "ip_address_v4", "ip_address_v6"],
+//   "placeholders": {},
+//   "allowlist": ["Apple"],
+//   "blocklist": ["SECRET"],
+//   "strict_validation": true
+// }
+
+// Deserialize from JSON/TOML
+let config: RedactionPolicyConfig = serde_json::from_str(&json).unwrap();
+let restored = RedactionPolicy::from_config(&config);
+```
+
 ### CLI Tool
 
 ```bash
@@ -289,7 +322,7 @@ Oversized payloads receive `413 Payload Too Large`.
 ## Testing
 
 ```bash
-# Run all tests (200+ tests)
+# Run all tests (215+ tests)
 cargo test --workspace
 
 # Run proxy tests only (unit + integration)

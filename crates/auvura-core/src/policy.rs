@@ -1,4 +1,4 @@
-use crate::types::PiiType;
+use crate::types::{PiiType, PiiTypeConfig};
 use std::collections::{HashMap, HashSet};
 
 /// Redaction policy – defines WHAT to redact and HOW to redact it
@@ -18,6 +18,38 @@ pub struct RedactionPolicy {
 
     /// Require validation for types that support it (e.g., Luhn check)
     strict_validation: bool,
+}
+
+/// Serializable representation of `RedactionPolicy`.
+///
+/// Can be serialized to/from JSON, TOML, or any serde-supported format.
+/// Use `RedactionPolicy::from_config()` to reconstruct a `RedactionPolicy`,
+/// and `RedactionPolicy::serialize()` to convert back.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RedactionPolicyConfig {
+    /// Enabled PII types
+    #[serde(default)]
+    pub enabled_types: Vec<PiiTypeConfig>,
+
+    /// Custom placeholder per PII type
+    #[serde(default)]
+    pub placeholders: HashMap<PiiTypeConfig, String>,
+
+    /// Terms that should never be redacted
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+
+    /// Terms that must always be redacted
+    #[serde(default)]
+    pub blocklist: Vec<String>,
+
+    /// Whether to require validation (e.g., Luhn check) before redacting
+    #[serde(default = "default_strict_validation")]
+    pub strict_validation: bool,
+}
+
+fn default_strict_validation() -> bool {
+    true
 }
 
 impl Default for RedactionPolicy {
@@ -44,6 +76,47 @@ impl RedactionPolicy {
     /// Builder pattern for ergonomic configuration
     pub fn builder() -> PolicyBuilder {
         PolicyBuilder::default()
+    }
+
+    /// Serialize this policy to a `RedactionPolicyConfig`.
+    pub fn serialize(&self) -> RedactionPolicyConfig {
+        RedactionPolicyConfig {
+            enabled_types: self.enabled_types.iter().map(|t| (*t).into()).collect(),
+            placeholders: self
+                .placeholder_map
+                .iter()
+                .map(|(k, v)| ((*k).into(), v.clone()))
+                .collect(),
+            allowlist: self.allowlist.clone(),
+            blocklist: self.blocklist.clone(),
+            strict_validation: self.strict_validation,
+        }
+    }
+
+    /// Reconstruct a `RedactionPolicy` from a serialized config.
+    ///
+    /// Unknown PII type names in `enabled_types` are silently ignored.
+    /// `Other(...)` types from config are skipped (cannot convert back to `&'static str`).
+    pub fn from_config(config: &RedactionPolicyConfig) -> Self {
+        let enabled_types: HashSet<PiiType> = config
+            .enabled_types
+            .iter()
+            .filter_map(|t| t.to_pii_type())
+            .collect();
+
+        let placeholder_map: HashMap<PiiType, String> = config
+            .placeholders
+            .iter()
+            .filter_map(|(k, v)| k.to_pii_type().map(|p| (p, v.clone())))
+            .collect();
+
+        Self {
+            enabled_types,
+            placeholder_map,
+            allowlist: config.allowlist.clone(),
+            blocklist: config.blocklist.clone(),
+            strict_validation: config.strict_validation,
+        }
     }
 
     /// Check if a PII type should be scanned for
@@ -209,5 +282,140 @@ mod tests {
     fn test_pci_requires_validation() {
         let policy = RedactionPolicy::pci_dss();
         assert!(policy.requires_validation());
+    }
+
+    #[test]
+    fn test_policy_config_round_trip_default() {
+        let policy = RedactionPolicy::default();
+        let config = policy.serialize();
+        let restored = RedactionPolicy::from_config(&config);
+
+        assert!(restored.is_enabled(PiiType::Email));
+        assert!(restored.is_enabled(PiiType::PhoneNumber));
+        assert!(restored.is_enabled(PiiType::Ssn));
+        assert!(restored.is_enabled(PiiType::CreditCard));
+        assert!(restored.is_enabled(PiiType::IpAddressV4));
+        assert!(restored.is_enabled(PiiType::IpAddressV6));
+        assert!(restored.requires_validation());
+    }
+
+    #[test]
+    fn test_policy_config_round_trip_gdpr() {
+        let policy = RedactionPolicy::gdpr();
+        let config = policy.serialize();
+        let restored = RedactionPolicy::from_config(&config);
+
+        assert!(restored.is_enabled(PiiType::Email));
+        assert!(restored.is_enabled(PiiType::PhoneNumber));
+        assert!(restored.is_enabled(PiiType::IpAddressV4));
+        assert!(!restored.is_enabled(PiiType::Ssn));
+    }
+
+    #[test]
+    fn test_policy_config_round_trip_with_blocklist_allowlist() {
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["SECRET", "CONFIDENTIAL"])
+            .with_allowlist(vec!["Apple", "Google"])
+            .build();
+
+        let config = policy.serialize();
+        let restored = RedactionPolicy::from_config(&config);
+
+        assert_eq!(restored.blocklist_terms(), &["SECRET", "CONFIDENTIAL"]);
+        assert_eq!(restored.allowlist_terms(), &["Apple", "Google"]);
+    }
+
+    #[test]
+    fn test_policy_config_round_trip_with_placeholders() {
+        let policy = RedactionPolicy::builder()
+            .with_placeholder(PiiType::Email, "[MAIL]")
+            .with_placeholder(PiiType::Ssn, "[SSN]")
+            .build();
+
+        let config = policy.serialize();
+        let restored = RedactionPolicy::from_config(&config);
+
+        assert_eq!(restored.custom_placeholder(PiiType::Email), Some("[MAIL]"));
+        assert_eq!(restored.custom_placeholder(PiiType::Ssn), Some("[SSN]"));
+        // CreditCard should have no custom placeholder
+        assert_eq!(restored.custom_placeholder(PiiType::CreditCard), None);
+    }
+
+    #[test]
+    fn test_policy_config_round_trip_strict_validation_false() {
+        let policy = RedactionPolicy::builder().strict_validation(false).build();
+
+        let config = policy.serialize();
+        assert!(!config.strict_validation);
+
+        let restored = RedactionPolicy::from_config(&config);
+        assert!(!restored.requires_validation());
+    }
+
+    #[test]
+    fn test_policy_config_serde_json() {
+        let policy = RedactionPolicy::builder()
+            .disable(PiiType::Ssn)
+            .with_blocklist(vec!["SECRET"])
+            .with_allowlist(vec!["Apple"])
+            .strict_validation(false)
+            .build();
+
+        let config = policy.serialize();
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        let parsed: RedactionPolicyConfig = serde_json::from_str(&json).unwrap();
+        let restored = RedactionPolicy::from_config(&parsed);
+
+        assert!(restored.is_enabled(PiiType::Email));
+        assert!(!restored.is_enabled(PiiType::Ssn));
+        assert_eq!(restored.blocklist_terms(), &["SECRET"]);
+        assert_eq!(restored.allowlist_terms(), &["Apple"]);
+        assert!(!restored.requires_validation());
+    }
+
+    #[test]
+    fn test_policy_config_from_json_string() {
+        let json = r#"{
+            "enabled_types": ["email", "phone_number", "credit_card"],
+            "allowlist": ["test@example.com"],
+            "blocklist": ["CONFIDENTIAL"],
+            "strict_validation": true
+        }"#;
+
+        let config: RedactionPolicyConfig = serde_json::from_str(json).unwrap();
+        let policy = RedactionPolicy::from_config(&config);
+
+        assert!(policy.is_enabled(PiiType::Email));
+        assert!(policy.is_enabled(PiiType::PhoneNumber));
+        assert!(policy.is_enabled(PiiType::CreditCard));
+        assert!(!policy.is_enabled(PiiType::Ssn));
+        assert_eq!(policy.allowlist_terms(), &["test@example.com"]);
+        assert_eq!(policy.blocklist_terms(), &["CONFIDENTIAL"]);
+    }
+
+    #[test]
+    fn test_policy_config_empty_is_default() {
+        let json = "{}";
+        let config: RedactionPolicyConfig = serde_json::from_str(json).unwrap();
+        let policy = RedactionPolicy::from_config(&config);
+
+        // Empty config should result in no enabled types (no defaults injected)
+        assert!(!policy.is_enabled(PiiType::Email));
+        assert!(!policy.is_enabled(PiiType::Ssn));
+    }
+
+    #[test]
+    fn test_policy_config_other_type_skipped() {
+        let json = r#"{
+            "enabled_types": ["email", {"other": "PERSON"}]
+        }"#;
+
+        let config: RedactionPolicyConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.enabled_types.len(), 2);
+
+        let policy = RedactionPolicy::from_config(&config);
+        // "PERSON" Other type is skipped, only Email remains
+        assert!(policy.is_enabled(PiiType::Email));
+        assert!(!policy.is_enabled(PiiType::Ssn));
     }
 }

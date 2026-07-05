@@ -1,5 +1,6 @@
 //! Auvura Proxy library — handlers, types, and test utilities
 
+pub mod config;
 pub mod provider;
 
 use auvura_core::{

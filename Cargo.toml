@@ -31,3 +31,7 @@ phonelib = "1.0.3"
 
 # Text matching
 aho-corasick = "1.1"
+
+# Configuration
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"

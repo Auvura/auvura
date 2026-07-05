@@ -3,6 +3,7 @@ members = [
     "crates/auvura-core",
     "crates/auvura-proxy",
     "crates/auvura-cli",
+    "crates/auvura-tests",
 ]
 resolver = "2"
 
@@ -40,3 +41,9 @@ toml = "0.8"
 futures-core = "0.3"
 futures = "0.3"
 pin-project-lite = "0.2"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Fuzzing
+libfuzzer-sys = "0.4"

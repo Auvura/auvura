@@ -239,6 +239,14 @@ Oversized payloads receive `413 Payload Too Large`.
 - **Local-First**: Proxy redacts data before it leaves your environment
 - **No False Negatives**: Strict validation mode ensures high precision
 
+## Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check — returns `{"status":"ok"}` |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions |
+| `POST` | `/v1/chat/completions/stream` | SSE streaming chat completions |
+
 ## Testing
 
 ```bash

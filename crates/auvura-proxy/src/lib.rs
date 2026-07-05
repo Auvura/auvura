@@ -22,7 +22,7 @@ use axum::{
         sse::{Event, Sse},
         IntoResponse,
     },
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use dashmap::DashMap;
@@ -114,6 +114,7 @@ pub fn app_router(
     max_body_bytes: usize,
 ) -> Router {
     let mut router = Router::new()
+        .route("/health", get(health_check))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(state);
@@ -136,6 +137,11 @@ pub fn app_router(
     }
 
     router
+}
+
+/// Health check endpoint for load balancers and monitoring.
+async fn health_check() -> (StatusCode, Json<Value>) {
+    (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
 }
 
 pub async fn chat_completions(
@@ -587,6 +593,30 @@ mod tests {
     }
 
     // ===== Handler integration tests =====
+
+    #[tokio::test]
+    async fn test_health_check_returns_ok() {
+        let config = test_config_with_url("http://localhost:0");
+        let app = app_router(config, None, None, 0);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+    }
 
     #[tokio::test]
     async fn test_chat_completions_unknown_provider() {

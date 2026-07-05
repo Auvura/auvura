@@ -12,7 +12,13 @@ serde_json.workspace = true
 regex = { workspace = true }
 aho-corasick = { workspace = true }
 phonelib = { workspace = true }
+futures-core = { workspace = true }
+pin-project-lite = { workspace = true }
 zeroize = "1.8.2"
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }
 
 [features]
 default = []

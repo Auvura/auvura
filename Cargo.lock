@@ -131,10 +131,14 @@ name = "auvura-core"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "futures",
+ "futures-core",
  "phonelib",
+ "pin-project-lite",
  "regex",
  "serde",
  "serde_json",
+ "tokio",
  "zeroize",
 ]
 

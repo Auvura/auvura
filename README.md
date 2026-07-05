@@ -6,9 +6,11 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 
 ## Features
 
-- ** PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address
+- **PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address
 - **Compliance-Ready**: GDPR, HIPAA, PCI-DSS profiles included
 - **Structured Redaction**: Preserves format while masking sensitive data
+- **JSON-Aware Redaction**: Redacts PII inside JSON string values while preserving structure
+- **Streaming Redaction**: Real-time PII redaction for async text streams
 - **Memory Safe**: Uses `zeroize` crate to securely erase detections from memory
 - **Provider-Agnostic Proxy**: OpenAI-compatible endpoint that forwards to any AI provider
 - **High Performance**: Built in Rust with zero-copy optimizations
@@ -24,6 +26,8 @@ auvura/
 │   │       ├── detector.rs     # Detector trait + MultiDetector
 │   │       ├── policy.rs       # Redaction policies + compliance profiles
 │   │       ├── redactor.rs     # Core redaction engine
+│   │       ├── json.rs         # JSON-structure-aware redaction
+│   │       ├── stream.rs       # Streaming redaction for async pipelines
 │   │       └── detectors/      # Individual detectors
 │   │           ├── email.rs
 │   │           ├── phone_number.rs
@@ -116,6 +120,40 @@ println!("{}", json);
 // Deserialize from JSON/TOML
 let config: RedactionPolicyConfig = serde_json::from_str(&json).unwrap();
 let restored = RedactionPolicy::from_config(&config);
+```
+
+#### JSON-Aware Redaction
+
+Redact PII inside JSON string values while preserving structure (keys, numbers, arrays):
+
+```rust
+use auvura_core::json::JsonRedactor;
+use auvura_core::redactor::Redactor;
+
+let redactor = Redactor::new(detectors, policy);
+let json_redactor = JsonRedactor::new(redactor);
+
+let input = r#"{"email": "john@example.com", "ssn": "123-45-6789", "age": 30}"#;
+let result = json_redactor.redact_json(input).unwrap();
+// {"email":"████.███@███████.com","ssn":"███-██-████","age":30}
+```
+
+#### Streaming Redaction
+
+Real-time PII redaction for async text streams (e.g., SSE from LLMs):
+
+```rust
+use auvura_core::stream::StreamingRedactor;
+use futures::stream;
+
+let streaming = StreamingRedactor::new(redactor);
+let chunks = stream::iter(vec![
+    Ok::<_, std::io::Error>("Contact ".to_string()),
+    Ok("john@example.com ".to_string()),
+    Ok("for help".to_string()),
+]);
+
+let results: Vec<_> = streaming.redact_stream(chunks).collect().await;
 ```
 
 ### CLI Tool
@@ -322,7 +360,7 @@ Oversized payloads receive `413 Payload Too Large`.
 ## Testing
 
 ```bash
-# Run all tests (215+ tests)
+# Run all tests (250+ tests)
 cargo test --workspace
 
 # Run proxy tests only (unit + integration)
@@ -333,7 +371,7 @@ cargo test --package auvura-core
 ```
 
 Test coverage includes:
-- **Core**: PII detectors (email, phone, SSN, credit card, IPv4/IPv6), redactor, policy, custom placeholders
+- **Core**: PII detectors (email, phone, SSN, credit card, IPv4/IPv6), redactor, policy, custom placeholders, JSON-aware redaction, streaming redaction
 - **Proxy**: Provider adapters (OpenAI, Anthropic), HTTP handler integration tests (via `tower::ServiceExt` + `wiremock`), `StreamCleanup` lifecycle, `mask_original` edge cases
 
 ## Status
@@ -350,6 +388,12 @@ Test coverage includes:
 - [x] Proxy configuration via TOML file + CLI args
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [x] CLI binary (`redact`, `validate`, `serve`)
+- [x] JSON-structure-aware redaction (`JsonRedactor`)
+- [x] Streaming redaction API (`StreamingRedactor`, `RedactorStreamExt`)
+- [x] Configurable phone country list
+- [x] CORS support
+- [x] Per-IP rate limiting
+- [x] Request size limits
 - [ ] Quoted email local parts (V2)
 - [ ] Performance benchmarking
 

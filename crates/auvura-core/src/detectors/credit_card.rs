@@ -70,7 +70,7 @@ impl CreditCardDetector {
     fn is_valid_card_number(s: &str) -> bool {
         let len = s.len();
 
-        if len < 13 || len > 19 {
+        if !(13..=19).contains(&len) {
             return false;
         }
 
@@ -89,7 +89,6 @@ impl CreditCardDetector {
                 }
             }
             // Check for Mastercard BIN range 2221-2720
-            // Parse first 4 digits as a number and check if in range
             if let Some(first_four) = s.get(0..4).and_then(|s| s.parse::<u16>().ok()) {
                 if (2221..=2720).contains(&first_four) {
                     return true;
@@ -97,19 +96,66 @@ impl CreditCardDetector {
             }
         }
 
-        // Discover: 6011, 65, 644-649
+        // Discover: 6011, 65, 644-649, 622126-622925
         if s.starts_with("6011") || s.starts_with("65") {
             return true;
         }
-        // Check for Discover BIN range 644-649
         if let Some(first_three) = s.get(0..3).and_then(|s| s.parse::<u16>().ok()) {
             if (644..=649).contains(&first_three) {
                 return true;
             }
         }
+        // Discover via UnionPay co-brand: 622126-622925 (16 digits)
+        if len == 16 {
+            if let Some(first_six) = s.get(0..6).and_then(|s| s.parse::<u32>().ok()) {
+                if (622126..=622925).contains(&first_six) {
+                    return true;
+                }
+            }
+        }
 
         // Amex: 34 or 37 (15 digits)
         if len == 15 && (s.starts_with("34") || s.starts_with("37")) {
+            return true;
+        }
+
+        // JCB: 3528-3589 (16 digits)
+        if len == 16 {
+            if let Some(first_four) = s.get(0..4).and_then(|s| s.parse::<u16>().ok()) {
+                if (3528..=3589).contains(&first_four) {
+                    return true;
+                }
+            }
+        }
+
+        // Diners Club International: 300-305, 309, 36, 38-39 (14 digits)
+        if len == 14 {
+            if let Some(first_three) = s.get(0..3).and_then(|s| s.parse::<u16>().ok()) {
+                if (300..=305).contains(&first_three) || first_three == 309 {
+                    return true;
+                }
+            }
+            if s.starts_with('3')
+                && (s.as_bytes()[1] == b'6' || s.as_bytes()[1] == b'8' || s.as_bytes()[1] == b'9')
+            {
+                return true;
+            }
+        }
+
+        // Maestro: 5018, 5020, 5038, 5893, 6304, 6759, 6761-6763 (12-19 digits)
+        if (12..=19).contains(&len) {
+            if let Some(
+                5018 | 5020 | 5038 | 5893 | 6304 | 6759 | 6761 | 6762 | 6763,
+            ) = s.get(0..4).and_then(|s| s.parse::<u16>().ok())
+            {
+                return true;
+            }
+        }
+
+        // China UnionPay: 62 (16-19 digits), 81 (16-19 digits)
+        // NOTE: UnionPay cards do NOT use Luhn validation in many cases,
+        // but we accept them here and let Luhn act as advisory.
+        if (16..=19).contains(&len) && (s.starts_with("62") || s.starts_with("81")) {
             return true;
         }
 
@@ -364,5 +410,89 @@ mod tests {
         let text = "Card: 2721000000000009";
         let detections = detector.detect(text);
         assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_detects_jcb() {
+        let detector = CreditCardDetector::new();
+        let text = "JCB: 3528000000000007";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].original, "3528000000000007");
+    }
+
+    #[test]
+    fn test_rejects_jcb_out_of_range() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 3527000000000007";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_detects_diners_club() {
+        let detector = CreditCardDetector::new();
+        let text = "Diners: 30560000000072";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].original, "30560000000072");
+    }
+
+    #[test]
+    fn test_rejects_diners_wrong_length() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 3056930902590201";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_detects_maestro() {
+        let detector = CreditCardDetector::new();
+        let text = "Maestro: 5893000000000058";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].original, "5893000000000058");
+    }
+
+    #[test]
+    fn test_detects_maestro_6304() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 6304000000000000";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_detects_unionpay() {
+        let detector = CreditCardDetector::new();
+        let text = "UnionPay: 6200000000000153";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].original, "6200000000000153");
+    }
+
+    #[test]
+    fn test_detects_unionpay_19_digits() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 6200000000000000158";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_rejects_unionpay_wrong_length() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 620000000000002";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_detects_81_prefix_unionpay() {
+        let detector = CreditCardDetector::new();
+        let text = "Card: 8100000000000028";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
     }
 }

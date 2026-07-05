@@ -71,7 +71,7 @@ impl PiiDetector for SimpleNameDetector {
         for word in words {
             let trimmed = word.trim_matches(|c: char| !c.is_alphabetic());
             if !trimmed.is_empty()
-                && trimmed.chars().next().map_or(false, |c| c.is_uppercase())
+                && trimmed.chars().next().is_some_and(|c| c.is_uppercase())
                 && trimmed.len() > 1
                 && trimmed.chars().all(|c| c.is_alphabetic())
             {
@@ -99,6 +99,12 @@ impl PiiDetector for SimpleNameDetector {
 pub struct TokenRedactor {
     token_map: HashMap<String, String>,
     counter: std::sync::atomic::AtomicUsize,
+}
+
+impl Default for TokenRedactor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TokenRedactor {

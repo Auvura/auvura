@@ -18,6 +18,12 @@ pub struct EmailDetector {
     pattern: &'static Regex,
 }
 
+impl Default for EmailDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EmailDetector {
     /// Create a new EmailDetector
     pub fn new() -> Self {
@@ -43,7 +49,7 @@ impl PiiDetector for EmailDetector {
         PiiType::Email
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
             .filter_map(|m| {

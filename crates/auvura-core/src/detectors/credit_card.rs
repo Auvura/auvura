@@ -21,6 +21,12 @@ pub struct CreditCardDetector {
     pattern: &'static Regex,
 }
 
+impl Default for CreditCardDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CreditCardDetector {
     /// Create a new CreditCardDetector
     pub fn new() -> Self {
@@ -167,11 +173,11 @@ impl PiiDetector for CreditCardDetector {
         PiiType::CreditCard
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
 
-    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         let mut detections = Vec::new();
 
         for m in self.pattern.find_iter(text) {

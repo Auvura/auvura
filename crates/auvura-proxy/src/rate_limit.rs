@@ -155,7 +155,7 @@ where
         }
 
         let fut = self.inner.call(req);
-        Box::pin(async { fut.await })
+        Box::pin(fut)
     }
 }
 

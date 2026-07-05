@@ -220,7 +220,7 @@ impl CorsConfig {
 
 /// Rate limiting configuration to protect against abuse.
 /// When omitted or disabled, no rate limiting is applied.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct RateLimitConfig {
     /// Maximum requests per second per IP. None disables rate limiting.
     #[serde(default)]
@@ -230,15 +230,6 @@ pub struct RateLimitConfig {
     /// Defaults to requests_per_second if None.
     #[serde(default)]
     pub burst_size: Option<u64>,
-}
-
-impl Default for RateLimitConfig {
-    fn default() -> Self {
-        Self {
-            requests_per_second: None,
-            burst_size: None,
-        }
-    }
 }
 
 impl RateLimitConfig {

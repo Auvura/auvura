@@ -36,6 +36,12 @@ pub struct Config {
 
     #[serde(default)]
     pub cors: CorsConfig,
+
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+
+    #[serde(default)]
+    pub request_limit: RequestLimitConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,6 +219,69 @@ impl CorsConfig {
 
         Some(cors)
     }
+}
+
+/// Rate limiting configuration to protect against abuse.
+/// When omitted or disabled, no rate limiting is applied.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RateLimitConfig {
+    /// Maximum requests per second per IP. None disables rate limiting.
+    #[serde(default)]
+    pub requests_per_second: Option<u64>,
+
+    /// Burst capacity (max concurrent requests allowed in a burst).
+    /// Defaults to requests_per_second if None.
+    #[serde(default)]
+    pub burst_size: Option<u64>,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            requests_per_second: None,
+            burst_size: None,
+        }
+    }
+}
+
+impl RateLimitConfig {
+    /// Returns true if rate limiting is configured.
+    pub fn is_enabled(&self) -> bool {
+        self.requests_per_second.unwrap_or(0) > 0
+    }
+
+    /// Build a rate limiter from this config.
+    /// Returns None if rate limiting is disabled.
+    pub fn to_limiter(&self) -> Option<crate::rate_limit::RateLimiter> {
+        let rps = self.requests_per_second?;
+        if rps == 0 {
+            return None;
+        }
+        let burst = self.burst_size.unwrap_or(rps);
+        Some(crate::rate_limit::RateLimiter::new(rps, burst))
+    }
+}
+
+/// Request size limit configuration.
+/// When omitted, defaults to 10 MB.
+#[derive(Debug, Deserialize, Clone)]
+pub struct RequestLimitConfig {
+    /// Maximum request body size in bytes. Defaults to 10 MB.
+    /// Set to 0 to disable size limits.
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: usize,
+}
+
+impl Default for RequestLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_body_bytes: default_max_body_bytes(),
+        }
+    }
+}
+
+fn default_max_body_bytes() -> usize {
+    10 * 1024 * 1024 // 10 MB
 }
 
 impl Config {
@@ -554,5 +623,63 @@ allowed_methods = ["POST"]
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(!config.cors.is_enabled());
         assert!(config.cors.to_cors_layer().is_none());
+    }
+
+    #[test]
+    fn test_parse_rate_limit_config() {
+        let toml_str = r#"
+[rate_limit]
+requests_per_second = 10
+burst_size = 20
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.rate_limit.is_enabled());
+        assert_eq!(config.rate_limit.requests_per_second, Some(10));
+        assert_eq!(config.rate_limit.burst_size, Some(20));
+        assert!(config.rate_limit.to_limiter().is_some());
+    }
+
+    #[test]
+    fn test_rate_limit_disabled_by_default() {
+        let config = Config::default();
+        assert!(!config.rate_limit.is_enabled());
+        assert!(config.rate_limit.to_limiter().is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_zero_rps_disabled() {
+        let toml_str = r#"
+[rate_limit]
+requests_per_second = 0
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.rate_limit.is_enabled());
+        assert!(config.rate_limit.to_limiter().is_none());
+    }
+
+    #[test]
+    fn test_parse_request_limit_config() {
+        let toml_str = r#"
+[request_limit]
+max_body_bytes = 1048576
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.request_limit.max_body_bytes, 1048576);
+    }
+
+    #[test]
+    fn test_request_limit_defaults_to_10mb() {
+        let config = Config::default();
+        assert_eq!(config.request_limit.max_body_bytes, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_request_limit_zero_disables() {
+        let toml_str = r#"
+[request_limit]
+max_body_bytes = 0
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.request_limit.max_body_bytes, 0);
     }
 }

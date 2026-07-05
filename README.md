@@ -97,6 +97,15 @@ curl http://localhost:3000/v1/chat/completions \
     "provider": "openai"
   }'
 
+# Anthropic Claude (uses Messages API)
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-sonnet-20240229",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "anthropic"
+  }'
+
 # SSE streaming endpoint (real-time token-by-token response)
 curl -N http://localhost:3000/v1/chat/completions/stream \
   -H "Content-Type: application/json" \

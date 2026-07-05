@@ -161,6 +161,23 @@ The client receives the reconstructed text in real-time. The actual PII never le
 - **Local-First**: Proxy redacts data before it leaves your environment
 - **No False Negatives**: Strict validation mode ensures high precision
 
+## Testing
+
+```bash
+# Run all tests (127+ tests)
+cargo test --workspace
+
+# Run proxy tests only (unit + integration)
+cargo test --package auvura-proxy
+
+# Run core library tests only
+cargo test --package auvura-core
+```
+
+Test coverage includes:
+- **Core**: PII detectors (email, phone, SSN, credit card, IPv4/IPv6), redactor, policy, custom placeholders
+- **Proxy**: Provider adapters (OpenAI, Anthropic), HTTP handler integration tests (via `tower::ServiceExt` + `wiremock`), `StreamCleanup` lifecycle, `mask_original` edge cases
+
 ## Status
 
 - [x] Core PII detection library

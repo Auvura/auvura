@@ -164,6 +164,64 @@ impl ProviderAdapter for AnthropicAdapter {
     }
 }
 
+/// Mock provider for testing — returns a fixed response
+pub struct MockProvider {
+    response: Value,
+}
+
+impl MockProvider {
+    pub fn new(response: Value) -> Self {
+        Self { response }
+    }
+}
+
+impl ProviderAdapter for MockProvider {
+    fn translate_request(&self, request: &Value) -> Value {
+        request.clone()
+    }
+
+    fn translate_response(&self, _response: &Value) -> Value {
+        self.response.clone()
+    }
+
+    fn base_url(&self) -> &str {
+        "http://localhost:0" // Won't actually be used
+    }
+
+    fn required_headers(&self, _api_key: &str) -> HashMap<String, String> {
+        HashMap::new()
+    }
+}
+
+/// Test provider that passes through to a configurable base URL
+pub struct FixedUrlProvider {
+    base_url: String,
+}
+
+impl FixedUrlProvider {
+    pub fn new(base_url: String) -> Self {
+        Self { base_url }
+    }
+}
+
+impl ProviderAdapter for FixedUrlProvider {
+    fn translate_request(&self, request: &Value) -> Value {
+        request.clone()
+    }
+
+    fn translate_response(&self, response: &Value) -> Value {
+        response.clone()
+    }
+
+    fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    fn required_headers(&self, _api_key: &str) -> HashMap<String, String> {
+        HashMap::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

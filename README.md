@@ -21,25 +21,38 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 auvura/
 ├── crates/
 │   ├── auvura-core/          # Core PII detection library
-│   │   └── src/
-│   │       ├── types.rs        # PII type definitions with regulatory basis
-│   │       ├── detector.rs     # Detector trait + MultiDetector
-│   │       ├── policy.rs       # Redaction policies + compliance profiles
-│   │       ├── redactor.rs     # Core redaction engine
-│   │       ├── json.rs         # JSON-structure-aware redaction
-│   │       ├── stream.rs       # Streaming redaction for async pipelines
-│   │       └── detectors/      # Individual detectors
-│   │           ├── email.rs
-│   │           ├── phone_number.rs
-│   │           ├── ssn.rs
-│   │           └── credit_card.rs
+│   │   ├── src/
+│   │   │   ├── types.rs        # PII type definitions with regulatory basis
+│   │   │   ├── detector.rs     # Detector trait + MultiDetector
+│   │   │   ├── policy.rs       # Redaction policies + compliance profiles
+│   │   │   ├── redactor.rs     # Core redaction engine
+│   │   │   ├── json.rs         # JSON-structure-aware redaction
+│   │   │   ├── stream.rs       # Streaming redaction for async pipelines
+│   │   │   └── detectors/      # Individual detectors
+│   │   │       ├── email.rs
+│   │   │       ├── phone_number.rs
+│   │   │       ├── ssn.rs
+│   │   │       └── credit_card.rs
+│   │   └── benches/          # Criterion benchmarks
 │   ├── auvura-cli/          # CLI binary (redact, validate, serve)
-│   └── auvura-proxy/        # Proxy server for AI API redaction
-│       └── src/
-│           ├── main.rs        # Axum server with /v1/chat/completions
-│           ├── config.rs      # TOML config + CLI arg parsing
-│           └── provider.rs     # Provider-agnostic adapter system
-└── Cargo.toml                   # Workspace configuration
+│   ├── auvura-proxy/        # Proxy server for AI API redaction
+│   │   └── src/
+│   │       ├── main.rs        # Axum server with /v1/chat/completions
+│   │       ├── config.rs      # TOML config + CLI arg parsing
+│   │       └── provider.rs     # Provider-agnostic adapter system
+│   └── auvura-tests/        # Integration tests
+│       └── tests/
+│           ├── redaction_pipeline.rs
+│           ├── json_redaction.rs
+│           ├── streaming_redaction.rs
+│           ├── policy_roundtrip.rs
+│           └── edge_cases.rs
+├── fuzz/                     # Fuzz testing targets
+│   └── fuzz_targets/
+│       ├── fuzz_redactor.rs
+│       ├── fuzz_json_redactor.rs
+│       └── fuzz_detectors.rs
+└── Cargo.toml                # Workspace configuration
 ```
 
 ## Quick Start
@@ -360,19 +373,31 @@ Oversized payloads receive `413 Payload Too Large`.
 ## Testing
 
 ```bash
-# Run all tests (250+ tests)
+# Run all tests (340+ tests)
 cargo test --workspace
 
-# Run proxy tests only (unit + integration)
-cargo test --package auvura-proxy
+# Run unit tests only
+cargo test -p auvura-core
+cargo test -p auvura-proxy
+cargo test -p auvura-cli
 
-# Run core library tests only
-cargo test --package auvura-core
+# Run integration tests
+cargo test -p auvura-tests
+
+# Run benchmarks
+cargo bench -p auvura-core --bench redaction_benchmarks
+
+# Run fuzz targets (requires nightly + cargo-fuzz)
+cargo +nightly fuzz run fuzz_redactor
+cargo +nightly fuzz run fuzz_json_redactor
+cargo +nightly fuzz run fuzz_detectors
 ```
 
 Test coverage includes:
-- **Core**: PII detectors (email, phone, SSN, credit card, IPv4/IPv6), redactor, policy, custom placeholders, JSON-aware redaction, streaming redaction
-- **Proxy**: Provider adapters (OpenAI, Anthropic), HTTP handler integration tests (via `tower::ServiceExt` + `wiremock`), `StreamCleanup` lifecycle, `mask_original` edge cases
+- **Unit tests**: PII detectors, redactor, policy, JSON redaction, streaming redaction (176 core + 61 proxy + 16 CLI)
+- **Integration tests**: End-to-end redaction pipeline, JSON structure preservation, streaming, policy round-trips, edge cases (86 tests in `auvura-tests`)
+- **Fuzz targets**: Redactor, JSON redactor, individual detectors — test for panics and invalid output on arbitrary input
+- **Benchmarks**: Detection speed, redaction throughput, JSON redaction, no-PII passthrough
 
 ## Status
 
@@ -394,6 +419,9 @@ Test coverage includes:
 - [x] CORS support
 - [x] Per-IP rate limiting
 - [x] Request size limits
+- [x] Integration test suite (86 tests across 5 test files)
+- [x] Criterion benchmarks (8 benchmarks)
+- [x] Fuzz targets (3 targets: redactor, JSON redactor, detectors)
 - [ ] Quoted email local parts (V2)
 - [ ] Performance benchmarking
 

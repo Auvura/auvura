@@ -19,6 +19,11 @@ zeroize = "1.8.2"
 [dev-dependencies]
 tokio = { workspace = true }
 futures = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "redaction_benchmarks"
+harness = false
 
 [features]
 default = []

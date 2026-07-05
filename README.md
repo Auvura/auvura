@@ -6,7 +6,7 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 
 ## Features
 
-- ** PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address
+- **PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address
 - **Compliance-Ready**: GDPR, HIPAA, PCI-DSS profiles included
 - **Structured Redaction**: Preserves format while masking sensitive data
 - **JSON-Aware Redaction**: Redacts PII inside JSON string values while preserving structure

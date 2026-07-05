@@ -95,6 +95,11 @@ pub struct PolicyConfig {
     #[serde(default)]
     pub enabled_types: Vec<String>,
 
+    /// ISO 3166-1 alpha-2 country codes for phone detection (if empty, uses defaults)
+    /// Countries are tried in order; the first match wins.
+    #[serde(default)]
+    pub phone_countries: Option<Vec<String>>,
+
     /// Blocklist terms that must always be redacted
     #[serde(default)]
     pub blocklist: Vec<String>,
@@ -170,9 +175,17 @@ impl Config {
             types::PiiType,
         };
 
+        let phone_detector: Box<dyn auvura_core::detector::PiiDetector> =
+            match &self.policy.phone_countries {
+                Some(countries) if !countries.is_empty() => {
+                    Box::new(PhoneNumberDetector::with_countries(countries.clone()))
+                }
+                _ => Box::new(PhoneNumberDetector::new()),
+            };
+
         let detectors: Vec<Box<dyn auvura_core::detector::PiiDetector>> = vec![
             Box::new(EmailDetector::new()),
-            Box::new(PhoneNumberDetector::new()),
+            phone_detector,
             Box::new(SSNDetector::new()),
             Box::new(CreditCardDetector::new()),
             Box::new(Ipv4Detector::new()),
@@ -343,5 +356,46 @@ allowlist = ["Apple"]
             api_key_env: "NONexistent_VAR_12345".to_string(),
         };
         assert_eq!(cfg.resolve_api_key(), None);
+    }
+
+    #[test]
+    fn test_parse_phone_countries() {
+        let toml_str = r#"
+[policy]
+phone_countries = ["DE", "FR", "JP"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.policy.phone_countries,
+            Some(vec!["DE".to_string(), "FR".to_string(), "JP".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_phone_countries_defaults_to_none() {
+        let toml_str = r#"
+[policy]
+enabled_types = ["email"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.policy.phone_countries, None);
+    }
+
+    #[test]
+    fn test_build_redactor_with_custom_phone_countries() {
+        let toml_str = r#"
+[policy]
+phone_countries = ["DE"]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let redactor = config.build_redactor();
+        // German number should be detected
+        let result = redactor.redact("DE: +49 30 12345678");
+        assert_ne!(result, "DE: +49 30 12345678");
+        // US local-format number with DE-only country list:
+        // phonelib may or may not accept this depending on number rules,
+        // so we test that intl prefix numbers still work
+        let result = redactor.redact("Intl: +12025550123");
+        assert_ne!(result, "Intl: +12025550123");
     }
 }

@@ -77,6 +77,12 @@ let redactor = Redactor::new(detectors, policy);
 let result = redactor.redact("Email john@example.com or call 123-456-7890");
 println!("{}", result);
 // Output: "Email [EMAIL] or call [PHONE]"
+
+// Custom phone country list (ISO 3166-1 alpha-2 codes)
+// Default: ["US", "GB", "DE", "FR", "CA", "AU", "JP"]
+let detector = detectors::PhoneNumberDetector::with_countries(
+    vec!["DE".into(), "FR".into(), "JP".into()]
+);
 ```
 
 ### Proxy Server
@@ -156,6 +162,25 @@ The client receives the reconstructed text in real-time. The actual PII never le
 | Credit Card | `#### #### #### ####` | `████ ████ ████ 1111` |
 | IPv4 | `192.168.1.1` | `█████████████` |
 | IPv6 | `::ffff:192.168.1.1` | `██████████████████████` |
+
+### Phone Country Configuration
+
+Phone detection supports a configurable country priority list. By default, it validates against **7 countries**: US, GB, DE, FR, CA, AU, JP.
+
+In `auvura.toml`:
+
+```toml
+[policy]
+phone_countries = ["DE", "FR", "JP"]  # Only detect DE, FR, JP numbers
+```
+
+Via code:
+
+```rust
+let detector = PhoneNumberDetector::with_countries(vec!["DE".into(), "FR".into()]);
+```
+
+Numbers with international prefix (`+`) are always validated via phonelib regardless of the country list.
 
 ## How It Works
 

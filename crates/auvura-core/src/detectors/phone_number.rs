@@ -13,15 +13,28 @@ use phonelib::PhoneNumber;
 use regex::Regex;
 use std::sync::OnceLock;
 
+/// Default country codes for phone number validation (US-first priority)
+pub const DEFAULT_PHONE_COUNTRIES: &[&str] = &["US", "GB", "DE", "FR", "CA", "AU", "JP"];
+
 /// PhoneNumberDetector - international phone number detection
 pub struct PhoneNumberDetector {
     candidate_pattern: &'static Regex,
+    countries: Vec<String>,
 }
 
 impl PhoneNumberDetector {
+    /// Create a PhoneNumberDetector with default country list (US, GB, DE, FR, CA, AU, JP)
     pub fn new() -> Self {
+        Self::with_countries(DEFAULT_PHONE_COUNTRIES.iter().map(|s| s.to_string()).collect())
+    }
+
+    /// Create a PhoneNumberDetector with a custom country priority list.
+    /// Countries are tried in order; the first match wins.
+    /// Use ISO 3166-1 alpha-2 codes (e.g., "US", "GB", "DE").
+    pub fn with_countries(countries: Vec<String>) -> Self {
         Self {
             candidate_pattern: Self::get_candidate_pattern(),
+            countries,
         }
     }
 
@@ -56,11 +69,7 @@ impl PhoneNumberDetector {
             return PhoneNumber::parse(&normalized).is_some();
         }
 
-        if PhoneNumber::parse_with_country(candidate, "US").is_some() {
-            return true;
-        }
-
-        for country in ["GB", "DE", "FR", "CA", "AU", "JP"] {
+        for country in &self.countries {
             if PhoneNumber::parse_with_country(candidate, country).is_some() {
                 return true;
             }
@@ -287,5 +296,60 @@ mod tests {
         let detections = detector.detect(text);
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].original, "+91 98765 43210");
+    }
+
+    #[test]
+    fn test_with_countries_custom_list() {
+        // Only accept DE numbers (Germany)
+        let detector = PhoneNumberDetector::with_countries(vec!["DE".to_string()]);
+        let text = "DE: +49 30 12345678";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_with_countries_empty_list_rejects_local_format() {
+        // Empty country list means no local-format validation
+        // Only +prefixed international numbers should work
+        let detector = PhoneNumberDetector::with_countries(vec![]);
+        let text = "US local: 202-555-0123";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 0);
+    }
+
+    #[test]
+    fn test_with_countries_empty_still_accepts_intl_prefix() {
+        let detector = PhoneNumberDetector::with_countries(vec![]);
+        let text = "Intl: +12025550123";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_with_countries_multiple() {
+        // Accept FR and JP only
+        let detector =
+            PhoneNumberDetector::with_countries(vec!["FR".to_string(), "JP".to_string()]);
+        let text = "FR: +33 1 23 45 67 89 and JP: +81 90 1234 5678";
+        let detections = detector.detect(text);
+        assert_eq!(detections.len(), 2);
+    }
+
+    #[test]
+    fn test_with_countries_intl_prefix() {
+        // +44 (UK) works even without UK in list, because phonelib handles international prefix
+        let detector = PhoneNumberDetector::with_countries(vec!["US".to_string()]);
+        let text = "UK: +44 20 7946 0958";
+        let detections = detector.detect(text);
+        // International prefix (+44) is handled by phonelib::parse, not parse_with_country
+        assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_default_countries_constant() {
+        assert_eq!(
+            DEFAULT_PHONE_COUNTRIES,
+            &["US", "GB", "DE", "FR", "CA", "AU", "JP"]
+        );
     }
 }

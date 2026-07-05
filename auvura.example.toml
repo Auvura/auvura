@@ -19,3 +19,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 # enabled_types = ["email", "phone", "ssn", "credit_card", "ipv4", "ipv6"]
 # blocklist = ["CONFIDENTIAL"]
 # allowlist = ["Apple Inc"]
+#
+# Optional: ISO 3166-1 alpha-2 country codes for phone detection.
+# Countries are tried in order; the first match wins.
+# Default: ["US", "GB", "DE", "FR", "CA", "AU", "JP"]
+# phone_countries = ["US", "DE", "JP"]

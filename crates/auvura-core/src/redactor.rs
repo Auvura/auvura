@@ -17,6 +17,15 @@ pub struct Redactor {
     policy: RedactionPolicy,
 }
 
+/// Check if a match at `start..end` in `text` is at a word boundary.
+/// A word boundary means the character before is non-alphanumeric (or start)
+/// and the character after is non-alphanumeric (or end).
+fn is_word_boundary_match(text: &str, start: usize, end: usize) -> bool {
+    let before_ok = start == 0 || !text.as_bytes()[start - 1].is_ascii_alphanumeric();
+    let after_ok = end >= text.len() || !text.as_bytes()[end].is_ascii_alphanumeric();
+    before_ok && after_ok
+}
+
 impl Redactor {
     /// Create a new redactor with detectors and policy
     pub fn new(detectors: Vec<Box<dyn PiiDetector>>, policy: RedactionPolicy) -> Self {
@@ -67,6 +76,11 @@ impl Redactor {
                 text.match_indices(term.as_str())
                     .filter_map(move |(start, _)| {
                         let end = start + term.len();
+                        // Only match whole words — skip partial matches like
+                        // "CONFIDENTIAL" inside "CONFIDENTIALITY"
+                        if !is_word_boundary_match(text, start, end) {
+                            return None;
+                        }
                         let overlaps_allowlist = allowlist
                             .iter()
                             .any(|&(a_start, a_end)| start < a_end && end > a_start);
@@ -130,7 +144,10 @@ impl Redactor {
         for term in self.policy.allowlist_terms() {
             for (start, _) in text.match_indices(term.as_str()) {
                 let end = start + term.len();
-                spans.push((start, end));
+                // Only protect whole-word allowlist matches
+                if is_word_boundary_match(text, start, end) {
+                    spans.push((start, end));
+                }
             }
         }
         spans
@@ -558,5 +575,86 @@ mod tests {
         let result = redactor.redact(input);
         // Default: format-preserving structured redaction
         assert_eq!(result, "Contact ████.███@███████.com");
+    }
+
+    #[test]
+    fn test_blocklist_does_not_match_word_substring() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["CONFIDENTIAL"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        // "CONFIDENTIALITY" contains "CONFIDENTIAL" but is a different word
+        let input = "This document is CONFIDENTIALITY";
+        let result = redactor.redact(input);
+        assert_eq!(result, input); // Nothing should be redacted
+    }
+
+    #[test]
+    fn test_blocklist_matches_whole_word() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["CONFIDENTIAL"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Mark this CONFIDENTIAL please";
+        let result = redactor.redact(input);
+        assert_eq!(result, "Mark this ████████████ please");
+    }
+
+    #[test]
+    fn test_blocklist_word_boundary_with_punctuation() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["SECRET"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        // Punctuation is a word boundary — "SECRET." should match
+        let input = "Keep this SECRET.";
+        let result = redactor.redact(input);
+        assert_eq!(result, "Keep this ██████.");
+
+        // "SECRETS" should NOT match (different word)
+        let input2 = "Keep these SECRETS safe";
+        let result2 = redactor.redact(input2);
+        assert_eq!(result2, input2);
+    }
+
+    #[test]
+    fn test_allowlist_word_boundary_prevents_redaction() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["APPLE"])
+            .with_allowlist(vec!["APPLE"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        // "APPLE" in allowlist should prevent redaction of the whole word
+        let input = "I like APPLE pie";
+        let result = redactor.redact(input);
+        assert_eq!(result, "I like APPLE pie");
+
+        // But "APPLE" inside "PINEAPPLE" should NOT be protected
+        let input2 = "I like PINEAPPLE pie";
+        let result2 = redactor.redact(input2);
+        assert_eq!(result2, "I like PINEAPPLE pie");
+    }
+
+    #[test]
+    fn test_blocklist_multiple_terms_word_boundary() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_blocklist(vec!["TOP", "SECRET"])
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "TOP SECRET info: TOPSECRET is not matched";
+        let result = redactor.redact(input);
+        // "TOP" and "SECRET" as standalone words are redacted
+        // "TOPSECRET" is one word — no match
+        assert_eq!(result, "███ ██████ info: TOPSECRET is not matched");
     }
 }

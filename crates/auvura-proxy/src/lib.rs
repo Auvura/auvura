@@ -35,6 +35,29 @@ use uuid::Uuid;
 
 pub type ProviderMap = HashMap<String, (Box<dyn provider::ProviderAdapter>, String)>;
 
+/// Internal fields that must NOT be forwarded to upstream provider APIs.
+/// `"provider"` is Auvura routing metadata; any `_auvura_*` fields are
+/// reserved for future internal use.
+const INTERNAL_FIELDS: &[&str] = &["provider"];
+
+/// Strip Auvura-internal fields from a request JSON before forwarding.
+/// Removes `"provider"` and any key starting with `_auvura_`.
+fn strip_internal_fields(request: &Value) -> Value {
+    let Some(obj) = request.as_object() else {
+        return request.clone();
+    };
+
+    let cleaned: serde_json::Map<String, Value> = obj
+        .iter()
+        .filter(|(key, _)| {
+            !INTERNAL_FIELDS.contains(&key.as_str()) && !key.starts_with("_auvura_")
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    Value::Object(cleaned)
+}
+
 pub struct AppConfig {
     pub redactor: Redactor,
     pub providers: ProviderMap,
@@ -117,7 +140,7 @@ pub async fn chat_completions(
         .to_lowercase();
 
     if let Some((adapter, api_key)) = state.providers.get(&provider_name) {
-        let provider_request = adapter.translate_request(&request);
+        let provider_request = adapter.translate_request(&strip_internal_fields(&request));
 
         let url = format!("{}/{}", adapter.base_url(), adapter.endpoint_path());
         let headers = adapter.required_headers(api_key);
@@ -259,7 +282,7 @@ pub async fn chat_completions_stream(
         return (StatusCode::NOT_FOUND, Json(error_body)).into_response();
     };
 
-    let mut provider_request = adapter.translate_request(&request);
+    let mut provider_request = adapter.translate_request(&strip_internal_fields(&request));
     if let Some(obj) = provider_request.as_object_mut() {
         obj.insert("stream".to_string(), Value::Bool(true));
     }
@@ -443,6 +466,58 @@ mod tests {
         drop(cleanup);
     }
 
+    // ===== strip_internal_fields tests =====
+
+    #[test]
+    fn test_strip_internal_fields_removes_provider() {
+        let request = serde_json::json!({
+            "model": "gpt-4",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "provider": "openai"
+        });
+
+        let stripped = strip_internal_fields(&request);
+        assert_eq!(stripped["model"], "gpt-4");
+        assert!(stripped.get("provider").is_none());
+        assert_eq!(stripped["messages"][0]["content"], "Hello");
+    }
+
+    #[test]
+    fn test_strip_internal_fields_removes_auvura_prefix() {
+        let request = serde_json::json!({
+            "model": "gpt-4",
+            "_auvura_session": "abc-123",
+            "_auvura_trace_id": "trace-456",
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let stripped = strip_internal_fields(&request);
+        assert_eq!(stripped["model"], "gpt-4");
+        assert!(stripped.get("_auvura_session").is_none());
+        assert!(stripped.get("_auvura_trace_id").is_none());
+    }
+
+    #[test]
+    fn test_strip_internal_fields_preserves_standard_fields() {
+        let request = serde_json::json!({
+            "model": "gpt-4",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 1024,
+            "stream": true,
+            "temperature": 0.7
+        });
+
+        let stripped = strip_internal_fields(&request);
+        assert_eq!(stripped, request);
+    }
+
+    #[test]
+    fn test_strip_internal_fields_handles_non_object() {
+        let value = Value::String("not an object".to_string());
+        let stripped = strip_internal_fields(&value);
+        assert_eq!(stripped, value);
+    }
+
     // ===== OpenAI adapter tests =====
 
     #[test]
@@ -595,5 +670,61 @@ mod tests {
             .unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("Unknown provider"));
+    }
+
+    #[tokio::test]
+    async fn test_provider_field_stripped_from_upstream_request() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Capture the request body sent to the upstream
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let config = test_config_with_url(&mock_server.uri());
+        let app = app_router(config);
+
+        let request = serde_json::json!({
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "provider": "mock",
+            "_auvura_session": "secret-session-id"
+        });
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&request).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        // Verify via wiremock that the upstream received the request
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+
+        let upstream_body: serde_json::Value =
+            serde_json::from_slice(&requests[0].body).unwrap();
+        // "provider" must NOT be in the upstream request
+        assert!(upstream_body.get("provider").is_none(), "provider field leaked to upstream");
+        // "_auvura_session" must NOT be in the upstream request
+        assert!(upstream_body.get("_auvura_session").is_none(), "_auvura_session leaked to upstream");
+        // Standard fields must still be present
+        assert_eq!(upstream_body["model"], "test-model");
     }
 }

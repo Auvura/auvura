@@ -22,6 +22,12 @@ pub struct PhoneNumberDetector {
     countries: Vec<String>,
 }
 
+impl Default for PhoneNumberDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhoneNumberDetector {
     /// Create a PhoneNumberDetector with default country list (US, GB, DE, FR, CA, AU, JP)
     pub fn new() -> Self {
@@ -89,7 +95,7 @@ impl PiiDetector for PhoneNumberDetector {
         PiiType::PhoneNumber
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         let mut detections = Vec::new();
 
         for m in self.candidate_pattern.find_iter(text) {
@@ -128,7 +134,7 @@ impl PiiDetector for PhoneNumberDetector {
 
             // Skip if trimmed candidate doesn't have enough digits
             let digit_count = trimmed.chars().filter(|c| c.is_ascii_digit()).count();
-            if digit_count < 7 || digit_count > 15 {
+            if !(7..=15).contains(&digit_count) {
                 continue;
             }
 

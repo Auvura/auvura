@@ -244,7 +244,7 @@ mod tests {
             PiiType::Email
         }
 
-        fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+        fn detect(&self, text: &str) -> Vec<Detection> {
             let mut detections = Vec::new();
             for (start, _) in text.match_indices('@') {
                 let word_start = text[..start]
@@ -387,7 +387,7 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::Ssn
             }
-            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+            fn detect(&self, text: &str) -> Vec<Detection> {
                 // Simple SSN pattern without regex: look for "###-##-####"
                 let mut detections = Vec::new();
                 let bytes = text.as_bytes();
@@ -438,7 +438,7 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
-            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+            fn detect(&self, text: &str) -> Vec<Detection> {
                 // For test purposes: detect exact test pattern
                 // Real detector will use regex in detectors/credit_card.rs later
                 if let Some(start) = text.find("4111 1111 1111 1111") {
@@ -469,10 +469,10 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
-            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+            fn detect(&self, text: &str) -> Vec<Detection> {
                 self.detect_with_validation(text, true)
             }
-            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+            fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
                 if let Some(start) = text.find("1234567890123456") {
                     let candidate = "1234567890123456";
                     // Simulate validation failure when validate=true
@@ -506,10 +506,10 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
-            fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+            fn detect(&self, text: &str) -> Vec<Detection> {
                 self.detect_with_validation(text, true)
             }
-            fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+            fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
                 if let Some(start) = text.find("1234567890123456") {
                     let candidate = "1234567890123456";
                     // Simulate validation failure when validate=true

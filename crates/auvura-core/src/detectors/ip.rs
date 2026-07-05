@@ -17,6 +17,12 @@ pub struct Ipv4Detector {
     pattern: &'static Regex,
 }
 
+impl Default for Ipv4Detector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Ipv4Detector {
     pub fn new() -> Self {
         Self {
@@ -38,11 +44,11 @@ impl PiiDetector for Ipv4Detector {
         PiiType::IpAddressV4
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
 
-    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
             .filter_map(|m| {
@@ -83,6 +89,12 @@ pub struct Ipv6Detector {
     /// Matches potential IPv6 candidates: hex digits and colons.
     /// Manual boundary check required since \b doesn't work with ':'.
     pattern: &'static Regex,
+}
+
+impl Default for Ipv6Detector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Ipv6Detector {
@@ -127,11 +139,11 @@ impl PiiDetector for Ipv6Detector {
         PiiType::IpAddressV6
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
 
-    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
             .filter_map(|m| {

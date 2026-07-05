@@ -20,6 +20,12 @@ pub struct SSNDetector {
     combined_pattern: &'static Regex,
 }
 
+impl Default for SSNDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SSNDetector {
     /// Create a new SSNDetector
     pub fn new() -> Self {
@@ -78,11 +84,11 @@ impl PiiDetector for SSNDetector {
         PiiType::Ssn
     }
 
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
 
-    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         let mut detections = Vec::new();
 
         // Single pass with combined pattern prevents overlaps

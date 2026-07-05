@@ -33,11 +33,11 @@ pub trait PiiDetector: Send + Sync {
     /// - MUST return detections sorted by `start` ascending
     /// - MUST NOT return overlapping detections (resolve conflicts internally)
     /// - MUST handle UTF-8 boundaries correctly (never split grapheme clusters)
-    fn detect<'a>(&self, text: &'a str) -> Vec<Detection>;
+    fn detect(&self, text: &str) -> Vec<Detection>;
 
     /// Detect PII with optional validation bypass
     /// Called by redactor with policy's strict_validation setting
-    fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         // Default: ignore validation flag and use detect()
         // Detectors that support validation should override this
         let _ = validate;
@@ -122,7 +122,7 @@ impl MultiDetector {
     /// 3. For each detector, extract candidate windows around its anchors.
     /// 4. Run detector's regex only on reduced candidate text.
     /// 5. Sort and resolve overlaps.
-    pub fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+    pub fn detect(&self, text: &str) -> Vec<Detection> {
         if text.is_empty() {
             return Vec::new();
         }
@@ -190,7 +190,7 @@ impl MultiDetector {
     }
 
     /// Detect with optional validation bypass
-    pub fn detect_with_validation<'a>(&self, text: &'a str, validate: bool) -> Vec<Detection> {
+    pub fn detect_with_validation(&self, text: &str, validate: bool) -> Vec<Detection> {
         if text.is_empty() {
             return Vec::new();
         }
@@ -344,7 +344,7 @@ mod tests {
         fn pii_type(&self) -> PiiType {
             PiiType::Email
         }
-        fn detect<'a>(&self, text: &'a str) -> Vec<Detection> {
+        fn detect(&self, text: &str) -> Vec<Detection> {
             if let Some(idx) = text.find('@') {
                 // Simplified for test – real detector uses proper regex
                 let start = text[..idx].rfind(' ').map_or(0, |i| i + 1);
@@ -448,7 +448,7 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::Other("test")
             }
-            fn detect<'a>(&self, _text: &'a str) -> Vec<Detection> {
+            fn detect(&self, _text: &str) -> Vec<Detection> {
                 vec![]
             }
         }

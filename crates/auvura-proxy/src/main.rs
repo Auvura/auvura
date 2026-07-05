@@ -33,20 +33,14 @@ fn load_config() -> (Redactor, auvura_proxy::ProviderMap) {
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         providers.insert(
             "openai".to_string(),
-            (
-                Box::new(auvura_proxy::provider::OpenAIAdapter),
-                api_key,
-            ),
+            (Box::new(auvura_proxy::provider::OpenAIAdapter), api_key),
         );
     }
 
     if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
         providers.insert(
             "anthropic".to_string(),
-            (
-                Box::new(auvura_proxy::provider::AnthropicAdapter),
-                api_key,
-            ),
+            (Box::new(auvura_proxy::provider::AnthropicAdapter), api_key),
         );
     }
 

@@ -153,7 +153,8 @@ The client receives the reconstructed text in real-time. The actual PII never le
 2. **Validation**: Luhn checks (credit cards), SSA rules (SSN), phonelib (phones)
 3. **Priority Resolution**: Higher priority PII types win on overlaps (SSN > CreditCard > Phone > Email)
 4. **Structured Redaction**: Format-preserving masks (show last 4 for credit cards)
-5. **Zero-Copy Optimization**: `Cow<str>` avoids allocations when no PII found
+5. **Multi-Message Support**: All PII-containing messages are redacted and reconstructed (not just the last one)
+6. **Zero-Copy Optimization**: `Cow<str>` avoids allocations when no PII found
 
 ## Security
 

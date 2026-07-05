@@ -87,7 +87,9 @@ pub async fn chat_completions(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
 ) -> Json<Value> {
-    let mut session_id = None;
+    // Collect ALL originals from messages containing PII
+    let mut originals: Vec<String> = Vec::new();
+
     if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
         for message in messages {
             if let Some(content) = message.get_mut("content").and_then(|c| c.as_str()) {
@@ -95,9 +97,7 @@ pub async fn chat_completions(
                 let redacted = state.redactor.redact(&original);
 
                 if redacted.as_ref() != original.as_str() {
-                    let id = Uuid::new_v4().to_string();
-                    state.context_store.insert(id.clone(), original.clone());
-                    session_id = Some(id);
+                    originals.push(original.clone());
                     message["content"] = Value::String(redacted.into_owned());
                 } else {
                     message["content"] = Value::String(redacted.into_owned());
@@ -128,31 +128,32 @@ pub async fn chat_completions(
                 if let Ok(provider_response) = response.json::<Value>().await {
                     let mut standard_response = adapter.translate_response(&provider_response);
 
-                    if let Some(id) = &session_id {
-                        if let Some(original) = state.context_store.get(id) {
-                            if let Some(choices) = standard_response
-                                .get_mut("choices")
-                                .and_then(|c| c.as_array_mut())
-                            {
-                                for choice in choices {
-                                    if let Some(message) =
-                                        choice.get_mut("message").and_then(|m| m.as_object_mut())
+                    // Reconstruct ALL originals in the response
+                    if !originals.is_empty() {
+                        if let Some(choices) = standard_response
+                            .get_mut("choices")
+                            .and_then(|c| c.as_array_mut())
+                        {
+                            for choice in choices {
+                                if let Some(message) =
+                                    choice.get_mut("message").and_then(|m| m.as_object_mut())
+                                {
+                                    if let Some(content) =
+                                        message.get_mut("content").and_then(|c| c.as_str())
                                     {
-                                        if let Some(content) =
-                                            message.get_mut("content").and_then(|c| c.as_str())
-                                        {
+                                        let mut reconstructed = content.to_string();
+                                        for original in &originals {
                                             let redacted_form: String = state
                                                 .redactor
                                                 .redact(original.as_str())
                                                 .into_owned();
-                                            let reconstructed =
-                                                content.replace(&redacted_form, original.as_str());
-                                            message["content"] = Value::String(reconstructed);
+                                            reconstructed =
+                                                reconstructed.replace(&redacted_form, original);
                                         }
+                                        message["content"] = Value::String(reconstructed);
                                     }
                                 }
                             }
-                            state.context_store.remove(id);
                         }
                     }
 
@@ -278,29 +279,27 @@ pub async fn chat_completions_stream(
             let has_tokens = !reverse_map.is_empty();
             let session_id_clone = session_id.clone();
 
-            let stream = response.bytes_stream().map(move |chunk| {
-                match chunk {
-                    Ok(bytes) => {
-                        let mut text = String::from_utf8_lossy(&bytes).to_string();
+            let stream = response.bytes_stream().map(move |chunk| match chunk {
+                Ok(bytes) => {
+                    let mut text = String::from_utf8_lossy(&bytes).to_string();
 
-                        if has_tokens {
-                            if let Some(ref id) = session_id_clone {
-                                if let Some(stored) = context_store.get(id) {
-                                    if let Ok(map) =
-                                        serde_json::from_str::<HashMap<String, String>>(&stored)
-                                    {
-                                        for (token, original) in &map {
-                                            text = text.replace(token, original);
-                                        }
+                    if has_tokens {
+                        if let Some(ref id) = session_id_clone {
+                            if let Some(stored) = context_store.get(id) {
+                                if let Ok(map) =
+                                    serde_json::from_str::<HashMap<String, String>>(&stored)
+                                {
+                                    for (token, original) in &map {
+                                        text = text.replace(token, original);
                                     }
                                 }
                             }
                         }
-
-                        Ok(Event::default().data(text))
                     }
-                    Err(e) => Ok(Event::default().event("error").data(format!("{}", e))),
+
+                    Ok(Event::default().data(text))
                 }
+                Err(e) => Ok(Event::default().event("error").data(format!("{}", e))),
             });
 
             let cleanup_id = session_id.unwrap_or_default();
@@ -495,7 +494,9 @@ mod tests {
                 .method("POST")
                 .uri("/v1/chat/completions")
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(serde_json::to_vec(&request).unwrap()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&request).unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -511,8 +512,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_completions_mock_provider() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -539,7 +540,9 @@ mod tests {
                 .method("POST")
                 .uri("/v1/chat/completions")
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(serde_json::to_vec(&request).unwrap()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&request).unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -550,10 +553,7 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            json["choices"][0]["message"]["content"],
-            "Hello from mock!"
-        );
+        assert_eq!(json["choices"][0]["message"]["content"], "Hello from mock!");
     }
 
     #[tokio::test]
@@ -573,7 +573,9 @@ mod tests {
                 .method("POST")
                 .uri("/v1/chat/completions/stream")
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(serde_json::to_vec(&request).unwrap()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&request).unwrap(),
+                ))
                 .unwrap(),
         )
         .await

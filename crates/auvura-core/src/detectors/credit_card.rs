@@ -144,9 +144,8 @@ impl CreditCardDetector {
 
         // Maestro: 5018, 5020, 5038, 5893, 6304, 6759, 6761-6763 (12-19 digits)
         if (12..=19).contains(&len) {
-            if let Some(
-                5018 | 5020 | 5038 | 5893 | 6304 | 6759 | 6761 | 6762 | 6763,
-            ) = s.get(0..4).and_then(|s| s.parse::<u16>().ok())
+            if let Some(5018 | 5020 | 5038 | 5893 | 6304 | 6759 | 6761 | 6762 | 6763) =
+                s.get(0..4).and_then(|s| s.parse::<u16>().ok())
             {
                 return true;
             }

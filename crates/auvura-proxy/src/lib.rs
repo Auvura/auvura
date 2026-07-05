@@ -22,7 +22,7 @@ use axum::{
         sse::{Event, Sse},
         IntoResponse,
     },
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use dashmap::DashMap;
@@ -53,9 +53,7 @@ fn strip_internal_fields(request: &Value) -> Value {
 
     let cleaned: serde_json::Map<String, Value> = obj
         .iter()
-        .filter(|(key, _)| {
-            !INTERNAL_FIELDS.contains(&key.as_str()) && !key.starts_with("_auvura_")
-        })
+        .filter(|(key, _)| !INTERNAL_FIELDS.contains(&key.as_str()) && !key.starts_with("_auvura_"))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
@@ -114,6 +112,7 @@ pub fn app_router(
     max_body_bytes: usize,
 ) -> Router {
     let mut router = Router::new()
+        .route("/health", get(health_check))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(state);
@@ -125,9 +124,7 @@ pub fn app_router(
 
     // Rate limiting (per-IP via X-Forwarded-For or connecting IP)
     if let Some(limiter) = rate_limiter {
-        router = router.layer(rate_limit::RateLimitLayer {
-            limiter,
-        });
+        router = router.layer(rate_limit::RateLimitLayer { limiter });
     }
 
     // CORS (applied last so it wraps everything)
@@ -136,6 +133,11 @@ pub fn app_router(
     }
 
     router
+}
+
+/// Health check endpoint for load balancers and monitoring.
+async fn health_check() -> (StatusCode, Json<Value>) {
+    (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
 }
 
 pub async fn chat_completions(
@@ -214,22 +216,31 @@ pub async fn chat_completions(
 
                     (StatusCode::OK, Json(standard_response))
                 } else {
-                    (StatusCode::BAD_GATEWAY, Json(Value::Object(serde_json::Map::from_iter(vec![(
-                        "error".to_string(),
-                        Value::String("Failed to parse provider response".to_string()),
-                    )]))))
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        Json(Value::Object(serde_json::Map::from_iter(vec![(
+                            "error".to_string(),
+                            Value::String("Failed to parse provider response".to_string()),
+                        )]))),
+                    )
                 }
             }
-            Err(e) => (StatusCode::BAD_GATEWAY, Json(Value::Object(serde_json::Map::from_iter(vec![(
-                "error".to_string(),
-                Value::String(format!("Provider request failed: {}", e)),
-            )])))),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(Value::Object(serde_json::Map::from_iter(vec![(
+                    "error".to_string(),
+                    Value::String(format!("Provider request failed: {}", e)),
+                )]))),
+            ),
         }
     } else {
-        (StatusCode::NOT_FOUND, Json(Value::Object(serde_json::Map::from_iter(vec![(
-            "error".to_string(),
-            Value::String(format!("Unknown provider: {}", provider_name)),
-        )]))))
+        (
+            StatusCode::NOT_FOUND,
+            Json(Value::Object(serde_json::Map::from_iter(vec![(
+                "error".to_string(),
+                Value::String(format!("Unknown provider: {}", provider_name)),
+            )]))),
+        )
     }
 }
 
@@ -589,6 +600,30 @@ mod tests {
     // ===== Handler integration tests =====
 
     #[tokio::test]
+    async fn test_health_check_returns_ok() {
+        let config = test_config_with_url("http://localhost:0");
+        let app = app_router(config, None, None, 0);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+    }
+
+    #[tokio::test]
     async fn test_chat_completions_unknown_provider() {
         let config = test_config_with_url("http://localhost:0");
         let app = app_router(config, None, None, 0);
@@ -746,12 +781,17 @@ mod tests {
         let requests = mock_server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
 
-        let upstream_body: serde_json::Value =
-            serde_json::from_slice(&requests[0].body).unwrap();
+        let upstream_body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
         // "provider" must NOT be in the upstream request
-        assert!(upstream_body.get("provider").is_none(), "provider field leaked to upstream");
+        assert!(
+            upstream_body.get("provider").is_none(),
+            "provider field leaked to upstream"
+        );
         // "_auvura_session" must NOT be in the upstream request
-        assert!(upstream_body.get("_auvura_session").is_none(), "_auvura_session leaked to upstream");
+        assert!(
+            upstream_body.get("_auvura_session").is_none(),
+            "_auvura_session leaked to upstream"
+        );
         // Standard fields must still be present
         assert_eq!(upstream_body["model"], "test-model");
     }

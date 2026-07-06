@@ -42,6 +42,9 @@ pub struct Config {
 
     #[serde(default)]
     pub request_limit: RequestLimitConfig,
+
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,6 +273,60 @@ impl Default for RequestLimitConfig {
 
 fn default_max_body_bytes() -> usize {
     10 * 1024 * 1024 // 10 MB
+}
+
+/// Authentication configuration for the proxy.
+/// When omitted or disabled, no authentication is required.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct AuthConfig {
+    /// Enable authentication. Defaults to false.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// API keys that are allowed to access the proxy.
+    /// Keys can be literal values or environment variable references.
+    #[serde(default)]
+    pub api_keys: Vec<AuthApiKey>,
+}
+
+/// An API key configuration entry.
+#[derive(Debug, Deserialize, Clone)]
+pub struct AuthApiKey {
+    /// Literal API key value (for config file — prefer env)
+    #[serde(default)]
+    pub value: Option<String>,
+
+    /// Environment variable name containing the API key
+    #[serde(default)]
+    pub env: Option<String>,
+}
+
+impl AuthApiKey {
+    /// Resolve the API key: direct value takes precedence, then env var
+    pub fn resolve(&self) -> Option<String> {
+        if let Some(val) = &self.value {
+            return Some(val.clone());
+        }
+        if let Some(env_name) = &self.env {
+            if let Ok(val) = std::env::var(env_name) {
+                return Some(val);
+            }
+        }
+        None
+    }
+}
+
+impl AuthConfig {
+    /// Returns true if authentication is configured and enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled && !self.api_keys.is_empty()
+    }
+
+    /// Resolve all configured API keys into their values.
+    /// Returns only keys that could be successfully resolved.
+    pub fn resolve_keys(&self) -> Vec<String> {
+        self.api_keys.iter().filter_map(|k| k.resolve()).collect()
+    }
 }
 
 impl Config {
@@ -715,5 +772,100 @@ max_body_bytes = 0
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.request_limit.max_body_bytes, 0);
+    }
+
+    #[test]
+    fn test_parse_auth_config_disabled_by_default() {
+        let config = Config::default();
+        assert!(!config.auth.enabled);
+        assert!(config.auth.api_keys.is_empty());
+        assert!(!config.auth.is_enabled());
+    }
+
+    #[test]
+    fn test_parse_auth_config_enabled() {
+        let toml_str = r#"
+[auth]
+enabled = true
+
+[[auth.api_keys]]
+value = "secret-key-1"
+
+[[auth.api_keys]]
+env = "MY_API_KEY"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.auth.enabled);
+        assert_eq!(config.auth.api_keys.len(), 2);
+        assert!(config.auth.is_enabled());
+    }
+
+    #[test]
+    fn test_auth_config_enabled_but_no_keys() {
+        let toml_str = r#"
+[auth]
+enabled = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.auth.enabled);
+        assert!(config.auth.api_keys.is_empty());
+        // Enabled but no keys means not actually enabled
+        assert!(!config.auth.is_enabled());
+    }
+
+    #[test]
+    fn test_auth_api_key_resolve_value() {
+        let key = AuthApiKey {
+            value: Some("direct-key".to_string()),
+            env: None,
+        };
+        assert_eq!(key.resolve(), Some("direct-key".to_string()));
+    }
+
+    #[test]
+    fn test_auth_api_key_resolve_env() {
+        std::env::set_var("TEST_AUTH_KEY", "env-key");
+        let key = AuthApiKey {
+            value: None,
+            env: Some("TEST_AUTH_KEY".to_string()),
+        };
+        assert_eq!(key.resolve(), Some("env-key".to_string()));
+        std::env::remove_var("TEST_AUTH_KEY");
+    }
+
+    #[test]
+    fn test_auth_api_key_resolve_missing_env() {
+        let key = AuthApiKey {
+            value: None,
+            env: Some("NONEXISTENT_VAR_12345".to_string()),
+        };
+        assert_eq!(key.resolve(), None);
+    }
+
+    #[test]
+    fn test_auth_resolve_keys() {
+        std::env::set_var("TEST_AUTH_KEY_2", "env-key-2");
+        let auth = AuthConfig {
+            enabled: true,
+            api_keys: vec![
+                AuthApiKey {
+                    value: Some("direct-key".to_string()),
+                    env: None,
+                },
+                AuthApiKey {
+                    value: None,
+                    env: Some("TEST_AUTH_KEY_2".to_string()),
+                },
+                AuthApiKey {
+                    value: None,
+                    env: Some("NONEXISTENT_VAR".to_string()),
+                },
+            ],
+        };
+        let keys = auth.resolve_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"direct-key".to_string()));
+        assert!(keys.contains(&"env-key-2".to_string()));
+        std::env::remove_var("TEST_AUTH_KEY_2");
     }
 }

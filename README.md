@@ -417,6 +417,34 @@ burst_size = 10             # Max concurrent requests in a burst
 
 Uses a token bucket algorithm: each IP gets a bucket that refills at `requests_per_second` tokens/sec, up to `burst_size` capacity. Over-limit requests receive `429 Too Many Requests`.
 
+### Authentication
+
+API key authentication protects the proxy from unauthorized access. **Disabled by default** — anyone on the network can use the proxy.
+
+When enabled, clients must include a valid API key in the `Authorization` header:
+```
+Authorization: Bearer <api-key>
+```
+
+In `auvura.toml`:
+
+```toml
+[auth]
+enabled = true
+
+[[auth.api_keys]]
+value = "your-secret-api-key"  # Direct value (not recommended for production)
+
+[[auth.api_keys]]
+env = "PROXY_API_KEY"          # Read from environment variable (recommended)
+```
+
+Features:
+- Multiple API keys supported
+- Keys can be literal values or environment variable references
+- Health endpoint (`/health`) is always accessible without authentication
+- Returns `401 Unauthorized` with `WWW-Authenticate: Bearer` header on failure
+
 ### Request Size Limits
 
 Maximum request body size defaults to **10 MB**. Set to `0` to disable.

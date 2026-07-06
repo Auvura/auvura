@@ -37,7 +37,22 @@ async fn main() {
     let cors = config.cors.to_cors_layer();
     let rate_limiter = config.rate_limit.to_limiter();
     let max_body_bytes = config.request_limit.max_body_bytes;
-    let app = auvura_proxy::app_router(app_state, cors, rate_limiter, max_body_bytes);
+
+    // Build auth state if enabled
+    let auth_state = if config.auth.is_enabled() {
+        let keys = config.auth.resolve_keys();
+        if keys.is_empty() {
+            eprintln!("Warning: authentication enabled but no valid API keys configured");
+            None
+        } else {
+            println!("Authentication enabled with {} API key(s)", keys.len());
+            Some(auvura_proxy::auth::AuthState::new(keys))
+        }
+    } else {
+        None
+    };
+
+    let app = auvura_proxy::app_router(app_state, cors, rate_limiter, max_body_bytes, auth_state);
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port)
         .parse()

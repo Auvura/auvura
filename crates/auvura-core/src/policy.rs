@@ -61,6 +61,10 @@ impl Default for RedactionPolicy {
         enabled.insert(PiiType::CreditCard);
         enabled.insert(PiiType::IpAddressV4);
         enabled.insert(PiiType::IpAddressV6);
+        enabled.insert(PiiType::Iban);
+        enabled.insert(PiiType::PassportNumber);
+        enabled.insert(PiiType::NationalId);
+        enabled.insert(PiiType::PhysicalAddress);
 
         Self {
             enabled_types: enabled,

@@ -6,7 +6,7 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 
 ## Features
 
-- **PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address
+- **PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address, IBAN, Passport, National ID, Physical Address
 - **Compliance-Ready**: GDPR, HIPAA, PCI-DSS profiles included
 - **Structured Redaction**: Preserves format while masking sensitive data
 - **JSON-Aware Redaction**: Redacts PII inside JSON string values while preserving structure
@@ -32,14 +32,21 @@ auvura/
 │   │   │       ├── email.rs
 │   │   │       ├── phone_number.rs
 │   │   │       ├── ssn.rs
-│   │   │       └── credit_card.rs
+│   │   │       ├── credit_card.rs
+│   │   │       ├── ip.rs
+│   │   │       ├── iban.rs
+│   │   │       ├── passport.rs
+│   │   │       ├── national_id.rs
+│   │   │       ├── address.rs
+│   │   │       └── ner.rs
 │   │   └── benches/          # Criterion benchmarks
 │   ├── auvura-cli/          # CLI binary (redact, validate, serve)
 │   ├── auvura-proxy/        # Proxy server for AI API redaction
 │   │   └── src/
 │   │       ├── main.rs        # Axum server with /v1/chat/completions
 │   │       ├── config.rs      # TOML config + CLI arg parsing
-│   │       └── provider.rs     # Provider-agnostic adapter system
+│   │       ├── provider.rs    # Provider-agnostic adapter system
+│   │       └── rate_limit.rs  # Per-IP token bucket rate limiter
 │   └── auvura-tests/        # Integration tests
 │       └── tests/
 │           ├── redaction_pipeline.rs
@@ -394,7 +401,7 @@ cargo +nightly fuzz run fuzz_detectors
 ```
 
 Test coverage includes:
-- **Unit tests**: PII detectors, redactor, policy, JSON redaction, streaming redaction (176 core + 61 proxy + 16 CLI)
+- **Unit tests**: PII detectors, redactor, policy, JSON redaction, streaming redaction (218 core + 61 proxy + 16 CLI)
 - **Integration tests**: End-to-end redaction pipeline, JSON structure preservation, streaming, policy round-trips, edge cases (86 tests in `auvura-tests`)
 - **Fuzz targets**: Redactor, JSON redactor, individual detectors — test for panics and invalid output on arbitrary input
 - **Benchmarks**: Detection speed, redaction throughput, JSON redaction, no-PII passthrough
@@ -403,12 +410,16 @@ Test coverage includes:
 
 - [x] Core PII detection library
 - [x] Email, Phone, SSN, Credit Card detectors
+- [x] IPv4/IPv6 detectors
+- [x] IBAN detector with mod-97 checksum validation
+- [x] Passport number detector (multiple country formats)
+- [x] National ID detector (Aadhaar, PAN, TFN, INSEE)
+- [x] Physical address detector (street, city, state, ZIP)
 - [x] Compliance policy profiles (GDPR, HIPAA, PCI-DSS)
 - [x] Structured redaction engine
 - [x] Provider-agnostic proxy with OpenAI-compatible API
 - [x] SSE streaming endpoint with real-time PII reconstruction
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
-- [x] IPv4/IPv6 detectors
 - [x] Aho-Corasick multi-pattern optimization for `MultiDetector`
 - [x] Proxy configuration via TOML file + CLI args
 - [ ] BERT-based NER (`ner` feature flag — placeholder)

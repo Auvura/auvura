@@ -161,6 +161,10 @@ fn pii_type_name(pii_type: PiiType) -> &'static str {
         PiiType::CreditCard => "credit_card",
         PiiType::IpAddressV4 => "ipv4",
         PiiType::IpAddressV6 => "ipv6",
+        PiiType::Iban => "iban",
+        PiiType::PassportNumber => "passport",
+        PiiType::NationalId => "national_id",
+        PiiType::PhysicalAddress => "address",
         PiiType::Other(name) => name,
     }
 }

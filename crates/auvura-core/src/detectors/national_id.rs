@@ -116,6 +116,7 @@ impl PiiDetector for NationalIdDetector {
 
                 Some(Detection {
                     pii_type: PiiType::NationalId,
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: candidate.to_string(),

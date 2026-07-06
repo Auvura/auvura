@@ -322,6 +322,10 @@ mod tests {
             PiiType::Email
         }
 
+        fn confidence(&self) -> crate::detector::Confidence {
+            crate::detector::Confidence::High
+        }
+
         fn detect(&self, text: &str) -> Vec<Detection> {
             let mut detections = Vec::new();
             for (start, _) in text.match_indices('@') {
@@ -335,6 +339,7 @@ mod tests {
                 if word_end > word_start && word_end <= text.len() {
                     detections.push(Detection {
                         pii_type: PiiType::Email,
+                        confidence: self.confidence(),
                         start: word_start,
                         end: word_end,
                         original: text[word_start..word_end].to_string(),
@@ -465,6 +470,9 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::Ssn
             }
+            fn confidence(&self) -> crate::detector::Confidence {
+                crate::detector::Confidence::High
+            }
             fn detect(&self, text: &str) -> Vec<Detection> {
                 // Simple SSN pattern without regex: look for "###-##-####"
                 let mut detections = Vec::new();
@@ -490,6 +498,7 @@ mod tests {
                         {
                             detections.push(Detection {
                                 pii_type: PiiType::Ssn,
+                                confidence: self.confidence(),
                                 start,
                                 end,
                                 original: text[start..end].to_string(),
@@ -516,12 +525,16 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
+            fn confidence(&self) -> crate::detector::Confidence {
+                crate::detector::Confidence::High
+            }
             fn detect(&self, text: &str) -> Vec<Detection> {
                 // For test purposes: detect exact test pattern
                 // Real detector will use regex in detectors/credit_card.rs later
                 if let Some(start) = text.find("4111 1111 1111 1111") {
                     return vec![Detection {
                         pii_type: PiiType::CreditCard,
+                        confidence: self.confidence(),
                         start,
                         end: start + 19, // length of "4111 1111 1111 1111"
                         original: "4111 1111 1111 1111".to_string(),
@@ -547,6 +560,9 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
+            fn confidence(&self) -> crate::detector::Confidence {
+                crate::detector::Confidence::High
+            }
             fn detect(&self, text: &str) -> Vec<Detection> {
                 self.detect_with_validation(text, true)
             }
@@ -559,6 +575,7 @@ mod tests {
                     }
                     return vec![Detection {
                         pii_type: PiiType::CreditCard,
+                        confidence: self.confidence(),
                         start,
                         end: start + 16,
                         original: candidate.to_string(),
@@ -584,6 +601,9 @@ mod tests {
             fn pii_type(&self) -> PiiType {
                 PiiType::CreditCard
             }
+            fn confidence(&self) -> crate::detector::Confidence {
+                crate::detector::Confidence::High
+            }
             fn detect(&self, text: &str) -> Vec<Detection> {
                 self.detect_with_validation(text, true)
             }
@@ -596,6 +616,7 @@ mod tests {
                     }
                     return vec![Detection {
                         pii_type: PiiType::CreditCard,
+                        confidence: self.confidence(),
                         start,
                         end: start + 16,
                         original: candidate.to_string(),

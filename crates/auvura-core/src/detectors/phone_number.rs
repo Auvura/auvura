@@ -142,6 +142,7 @@ impl PiiDetector for PhoneNumberDetector {
             if self.is_valid_phone(trimmed) {
                 detections.push(Detection {
                     pii_type: PiiType::PhoneNumber,
+                    confidence: self.confidence(),
                     start: new_start,
                     end: new_end,
                     original: trimmed.to_string(),

@@ -4,7 +4,7 @@
 //! BERT-based NER via candle is planned for a future release.
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use std::collections::HashMap;
@@ -62,6 +62,10 @@ impl PiiDetector for SimpleNameDetector {
         PiiType::Other("PERSON")
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::Low
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         let mut detections = Vec::new();
 
@@ -79,6 +83,7 @@ impl PiiDetector for SimpleNameDetector {
                     let abs_start = byte_offset + start;
                     detections.push(Detection {
                         pii_type: self.pii_type(),
+                        confidence: self.confidence(),
                         start: abs_start,
                         end: abs_start + trimmed.len(),
                         original: trimmed.to_string(),

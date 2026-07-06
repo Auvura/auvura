@@ -6,7 +6,7 @@
 //! - Word boundary enforcement for IPv4, manual boundaries for IPv6
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use regex::Regex;
@@ -44,6 +44,10 @@ impl PiiDetector for Ipv4Detector {
         PiiType::IpAddressV4
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::High
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
@@ -56,6 +60,7 @@ impl PiiDetector for Ipv4Detector {
                 if !validate || addr.parse::<IpAddr>().is_ok() {
                     Some(Detection {
                         pii_type: PiiType::IpAddressV4,
+                        confidence: self.confidence(),
                         start: m.start(),
                         end: m.end(),
                         original: addr.to_string(),
@@ -139,6 +144,10 @@ impl PiiDetector for Ipv6Detector {
         PiiType::IpAddressV6
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::High
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
@@ -159,6 +168,7 @@ impl PiiDetector for Ipv6Detector {
                 if !validate || candidate.parse::<IpAddr>().is_ok() {
                     Some(Detection {
                         pii_type: PiiType::IpAddressV6,
+                        confidence: self.confidence(),
                         start: m.start(),
                         end: m.end(),
                         original: candidate.to_string(),

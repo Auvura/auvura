@@ -519,6 +519,7 @@ For production, implement the `AuditLogger` trait to send events to your logging
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check — returns `{"status":"ok"}` |
+| `GET` | `/v1/models` | List available models (OpenAI-compatible) |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions |
 | `POST` | `/v1/chat/completions/stream` | SSE streaming chat completions |
 

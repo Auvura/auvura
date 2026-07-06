@@ -116,6 +116,7 @@ pub fn app_router(
 ) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
+        .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(state);
@@ -156,6 +157,82 @@ pub fn app_router(
 /// Health check endpoint for load balancers and monitoring.
 async fn health_check() -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+}
+
+/// List available models endpoint.
+///
+/// Returns a list of models available through the configured providers,
+/// compatible with the OpenAI `/v1/models` API format.
+async fn list_models(State(state): State<Arc<AppConfig>>) -> (StatusCode, Json<Value>) {
+    let mut models: Vec<Value> = Vec::new();
+
+    for (provider_name, (_adapter, _api_key)) in &state.providers {
+        // Add a representative model for each configured provider
+        let model = match provider_name.as_str() {
+            "openai" => serde_json::json!({
+                "id": "gpt-4",
+                "object": "model",
+                "owned_by": "openai",
+                "provider": provider_name,
+            }),
+            "anthropic" => serde_json::json!({
+                "id": "claude-3-sonnet-20240229",
+                "object": "model",
+                "owned_by": "anthropic",
+                "provider": provider_name,
+            }),
+            "gemini" | "google" => serde_json::json!({
+                "id": "gemini-pro",
+                "object": "model",
+                "owned_by": "google",
+                "provider": provider_name,
+            }),
+            "mistral" | "mistralai" => serde_json::json!({
+                "id": "mistral-large-latest",
+                "object": "model",
+                "owned_by": "mistral",
+                "provider": provider_name,
+            }),
+            "cohere" => serde_json::json!({
+                "id": "command-r-plus",
+                "object": "model",
+                "owned_by": "cohere",
+                "provider": provider_name,
+            }),
+            "azure" | "azure_openai" => serde_json::json!({
+                "id": "gpt-4",
+                "object": "model",
+                "owned_by": "azure-openai",
+                "provider": provider_name,
+            }),
+            "bedrock" | "aws" => serde_json::json!({
+                "id": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "object": "model",
+                "owned_by": "aws-bedrock",
+                "provider": provider_name,
+            }),
+            "ollama" | "vllm" => serde_json::json!({
+                "id": "llama3",
+                "object": "model",
+                "owned_by": "ollama",
+                "provider": provider_name,
+            }),
+            _ => serde_json::json!({
+                "id": "default",
+                "object": "model",
+                "owned_by": provider_name,
+                "provider": provider_name,
+            }),
+        };
+        models.push(model);
+    }
+
+    let response = serde_json::json!({
+        "object": "list",
+        "data": models,
+    });
+
+    (StatusCode::OK, Json(response))
 }
 
 pub async fn chat_completions(
@@ -640,6 +717,65 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn test_list_models_returns_providers() {
+        let config = test_config_with_url("http://localhost:0");
+        let app = app_router(config, None, None, 0, None);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/v1/models")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["object"], "list");
+        assert!(json["data"].is_array());
+        // Should have at least one model (the mock provider)
+        assert!(json["data"].as_array().unwrap().len() >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_models_empty_when_no_providers() {
+        let config = test_config_with_url("http://localhost:0");
+        // Clear providers to test empty case
+        let config = std::sync::Arc::new(AppConfig {
+            redactor: test_redactor(),
+            providers: HashMap::new(),
+            http_client: Client::new(),
+            context_store: std::sync::Arc::new(DashMap::new()),
+        });
+        let app = app_router(config, None, None, 0, None);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/v1/models")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["object"], "list");
+        assert_eq!(json["data"].as_array().unwrap().len(), 0);
     }
 
     #[tokio::test]

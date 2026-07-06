@@ -239,8 +239,11 @@ pub async fn chat_completions(
     State(state): State<Arc<AppConfig>>,
     Json(mut request): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    // Collect ALL originals from messages containing PII
-    let mut originals: Vec<String> = Vec::new();
+    // Token-based PII reconstruction for non-streaming responses.
+    // Uses [[PII_0]], [[PII_1]] tokens instead of redacted forms,
+    // which is more robust against LLM rephrasing.
+    let mut token_map: HashMap<String, String> = HashMap::new();
+    let mut token_counter: usize = 0;
 
     if let Some(messages) = request.get_mut("messages").and_then(|m| m.as_array_mut()) {
         for message in messages {
@@ -249,8 +252,10 @@ pub async fn chat_completions(
                 let redacted = state.redactor.redact(&original);
 
                 if redacted.as_ref() != original.as_str() {
-                    originals.push(original.clone());
-                    message["content"] = Value::String(redacted.into_owned());
+                    let token = format!("[[PII_{}]]", token_counter);
+                    token_counter += 1;
+                    token_map.insert(token.clone(), original);
+                    message["content"] = Value::String(token);
                 } else {
                     message["content"] = Value::String(redacted.into_owned());
                 }
@@ -280,8 +285,8 @@ pub async fn chat_completions(
                 if let Ok(provider_response) = response.json::<Value>().await {
                     let mut standard_response = adapter.translate_response(&provider_response);
 
-                    // Reconstruct ALL originals in the response
-                    if !originals.is_empty() {
+                    // Reconstruct ALL originals in the response using token mapping
+                    if !token_map.is_empty() {
                         if let Some(choices) = standard_response
                             .get_mut("choices")
                             .and_then(|c| c.as_array_mut())
@@ -294,13 +299,9 @@ pub async fn chat_completions(
                                         message.get_mut("content").and_then(|c| c.as_str())
                                     {
                                         let mut reconstructed = content.to_string();
-                                        for original in &originals {
-                                            let redacted_form: String = state
-                                                .redactor
-                                                .redact(original.as_str())
-                                                .into_owned();
+                                        for (token, original) in &token_map {
                                             reconstructed =
-                                                reconstructed.replace(&redacted_form, original);
+                                                reconstructed.replace(token, original);
                                         }
                                         message["content"] = Value::String(reconstructed);
                                     }
@@ -748,7 +749,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_models_empty_when_no_providers() {
-        let config = test_config_with_url("http://localhost:0");
+        let _config = test_config_with_url("http://localhost:0");
         // Clear providers to test empty case
         let config = std::sync::Arc::new(AppConfig {
             redactor: test_redactor(),
@@ -855,6 +856,58 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["choices"][0]["message"]["content"], "Hello from mock!");
+    }
+
+    #[tokio::test]
+    async fn test_pii_reconstruction_with_token_markers() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Mock response that echoes back the PII token (simulating LLM behavior)
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"role": "assistant", "content": "I received your email [[PII_0]] and will respond soon."}}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let config = test_config_with_url(&mock_server.uri());
+        let app = app_router(config, None, None, 0, None);
+
+        // Send message with PII - email should be tokenized
+        let request = serde_json::json!({
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Contact me at john@example.com"}],
+            "provider": "mock"
+        });
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&request).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // The token [[PII_0]] should be replaced with the original email
+        let content = json["choices"][0]["message"]["content"].as_str().unwrap();
+        assert!(content.contains("john@example.com"), "Token should be replaced with original email, got: {}", content);
+        assert!(!content.contains("[[PII_0]]"), "Token marker should not remain in output, got: {}", content);
     }
 
     #[tokio::test]

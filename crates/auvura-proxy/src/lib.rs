@@ -1,5 +1,6 @@
 //! Auvura Proxy library — handlers, types, and test utilities
 
+pub mod auth;
 pub mod config;
 pub mod provider;
 pub mod rate_limit;
@@ -16,8 +17,9 @@ use auvura_core::{
     redactor::Redactor,
 };
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Request, State},
     http::StatusCode,
+    middleware::Next,
     response::{
         sse::{Event, Sse},
         IntoResponse,
@@ -110,6 +112,7 @@ pub fn app_router(
     cors: Option<CorsLayer>,
     rate_limiter: Option<rate_limit::RateLimiter>,
     max_body_bytes: usize,
+    auth_state: Option<auth::AuthState>,
 ) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
@@ -125,6 +128,21 @@ pub fn app_router(
     // Rate limiting (per-IP via X-Forwarded-For or connecting IP)
     if let Some(limiter) = rate_limiter {
         router = router.layer(rate_limit::RateLimitLayer { limiter });
+    }
+
+    // Authentication (applied before CORS)
+    if let Some(auth) = auth_state {
+        router = router.layer(axum::middleware::from_fn(
+            move |request: Request<axum::body::Body>, next: Next| {
+                let auth_state = auth.clone();
+                async move {
+                    // Add auth state to request extensions
+                    let mut request = request;
+                    request.extensions_mut().insert(auth_state);
+                    auth::auth_middleware(request, next).await
+                }
+            },
+        ));
     }
 
     // CORS (applied last so it wraps everything)
@@ -440,6 +458,7 @@ pub fn test_config_with_url(base_url: &str) -> Arc<AppConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthState;
     use crate::provider::ProviderAdapter;
 
     // ===== mask_original tests =====
@@ -602,7 +621,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_check_returns_ok() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -626,7 +645,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_completions_unknown_provider() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let request = serde_json::json!({
             "model": "gpt-4",
@@ -672,7 +691,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -705,7 +724,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_unknown_provider_returns_sse_error() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -752,7 +771,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -807,7 +826,7 @@ mod tests {
             .allow_origin(["https://app.example.com".parse().unwrap()])
             .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
             .allow_headers([axum::http::header::CONTENT_TYPE]);
-        let app = app_router(config, Some(cors), None, 0);
+        let app = app_router(config, Some(cors), None, 0, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -837,7 +856,7 @@ mod tests {
     #[tokio::test]
     async fn test_cors_no_layer_no_headers() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -868,7 +887,7 @@ mod tests {
 
         let config = test_config_with_url("http://localhost:0");
         let limiter = RateLimiter::new(2, 2); // 2 req/s, burst of 2
-        let app = app_router(config, None, Some(limiter), 0);
+        let app = app_router(config, None, Some(limiter), 0, None);
 
         let make_request = || {
             let app = app.clone();
@@ -913,7 +932,7 @@ mod tests {
 
         let config = test_config_with_url("http://localhost:0");
         let limiter = RateLimiter::new(1, 1); // 1 req/s, burst of 1
-        let app = app_router(config, None, Some(limiter), 0);
+        let app = app_router(config, None, Some(limiter), 0, None);
 
         let make_request = |ip: &str| {
             let app = app.clone();
@@ -960,7 +979,7 @@ mod tests {
     async fn test_request_size_limit_rejects_oversized() {
         let config = test_config_with_url("http://localhost:0");
         // 100 byte limit
-        let app = app_router(config, None, None, 100);
+        let app = app_router(config, None, None, 100, None);
 
         // Create a request body larger than 100 bytes
         let large_body = "x".repeat(200);
@@ -983,7 +1002,7 @@ mod tests {
     async fn test_request_size_limit_allows_small() {
         let config = test_config_with_url("http://localhost:0");
         // 10MB limit
-        let app = app_router(config, None, None, 10 * 1024 * 1024);
+        let app = app_router(config, None, None, 10 * 1024 * 1024, None);
 
         let small_body = r#"{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}],"provider":"nonexistent"}"#;
         let response = tower::ServiceExt::oneshot(
@@ -1006,7 +1025,7 @@ mod tests {
     async fn test_no_size_limit_when_zero() {
         let config = test_config_with_url("http://localhost:0");
         // 0 = no limit
-        let app = app_router(config, None, None, 0);
+        let app = app_router(config, None, None, 0, None);
 
         let large_body = "x".repeat(1000);
         let response = tower::ServiceExt::oneshot(
@@ -1022,5 +1041,192 @@ mod tests {
         .unwrap();
 
         assert_ne!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    // ===== Authentication integration tests =====
+
+    #[tokio::test]
+    async fn test_auth_rejects_no_api_key() {
+        let config = test_config_with_url("http://localhost:0");
+        let auth_state = AuthState::new(vec!["valid-key".to_string()]);
+        let app = app_router(config, None, None, 0, Some(auth_state));
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "provider": "mock"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_rejects_invalid_api_key() {
+        let config = test_config_with_url("http://localhost:0");
+        let auth_state = AuthState::new(vec!["valid-key".to_string()]);
+        let app = app_router(config, None, None, 0, Some(auth_state));
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer invalid-key")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "provider": "mock"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_accepts_valid_api_key() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let config = test_config_with_url(&mock_server.uri());
+        let auth_state = AuthState::new(vec!["valid-key".to_string()]);
+        let app = app_router(config, None, None, 0, Some(auth_state));
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer valid-key")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "provider": "mock"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_health_endpoint_always_accessible() {
+        let config = test_config_with_url("http://localhost:0");
+        let auth_state = AuthState::new(vec!["valid-key".to_string()]);
+        let app = app_router(config, None, None, 0, Some(auth_state));
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_disabled_allows_all() {
+        let config = test_config_with_url("http://localhost:0");
+        let app = app_router(config, None, None, 0, None);
+
+        let response = tower::ServiceExt::oneshot(
+            app,
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_multiple_keys() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let config = test_config_with_url(&mock_server.uri());
+        let auth_state = AuthState::new(vec![
+            "key-1".to_string(),
+            "key-2".to_string(),
+            "key-3".to_string(),
+        ]);
+        let app = app_router(config, None, None, 0, Some(auth_state));
+
+        // Try with second key
+        let response = tower::ServiceExt::oneshot(
+            app.clone(),
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer key-2")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "provider": "mock"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 }

@@ -1,9 +1,13 @@
 use auvura_core::{
     detector::PiiDetector,
     detectors::{
+        address::AddressDetector,
         credit_card::CreditCardDetector,
         email::EmailDetector,
+        iban::IbanDetector,
         ip::{Ipv4Detector, Ipv6Detector},
+        national_id::NationalIdDetector,
+        passport::PassportDetector,
         phone_number::PhoneNumberDetector,
         ssn::SSNDetector,
     },
@@ -82,7 +86,7 @@ enum OutputFormat {
     Json,
 }
 
-fn build_redactor(config: &Config) -> Redactor {
+fn build_detectors(config: &Config) -> Vec<Box<dyn PiiDetector>> {
     let phone_detector: Box<dyn PiiDetector> = match &config.policy.phone_countries {
         Some(countries) if !countries.is_empty() => {
             Box::new(PhoneNumberDetector::with_countries(countries.clone()))
@@ -90,14 +94,22 @@ fn build_redactor(config: &Config) -> Redactor {
         _ => Box::new(PhoneNumberDetector::new()),
     };
 
-    let detectors: Vec<Box<dyn PiiDetector>> = vec![
+    vec![
         Box::new(EmailDetector::new()),
         phone_detector,
         Box::new(SSNDetector::new()),
         Box::new(CreditCardDetector::new()),
         Box::new(Ipv4Detector::new()),
         Box::new(Ipv6Detector::new()),
-    ];
+        Box::new(IbanDetector::new()),
+        Box::new(PassportDetector::new()),
+        Box::new(NationalIdDetector::new()),
+        Box::new(AddressDetector::new()),
+    ]
+}
+
+fn build_redactor(config: &Config) -> Redactor {
+    let detectors = build_detectors(config);
 
     let mut builder = PolicyBuilder::default();
 
@@ -109,17 +121,27 @@ fn build_redactor(config: &Config) -> Redactor {
             PiiType::CreditCard,
             PiiType::IpAddressV4,
             PiiType::IpAddressV6,
+            PiiType::Iban,
+            PiiType::PassportNumber,
+            PiiType::NationalId,
+            PiiType::PhysicalAddress,
         ] {
             builder = builder.disable(*pii_type);
         }
         for type_name in &config.policy.enabled_types {
             match type_name.as_str() {
                 "email" => builder = builder.enable(PiiType::Email),
-                "phone" => builder = builder.enable(PiiType::PhoneNumber),
+                "phone" | "phone_number" => builder = builder.enable(PiiType::PhoneNumber),
                 "ssn" => builder = builder.enable(PiiType::Ssn),
                 "credit_card" => builder = builder.enable(PiiType::CreditCard),
-                "ipv4" => builder = builder.enable(PiiType::IpAddressV4),
-                "ipv6" => builder = builder.enable(PiiType::IpAddressV6),
+                "ipv4" | "ip_address_v4" => builder = builder.enable(PiiType::IpAddressV4),
+                "ipv6" | "ip_address_v6" => builder = builder.enable(PiiType::IpAddressV6),
+                "iban" => builder = builder.enable(PiiType::Iban),
+                "passport" | "passport_number" => builder = builder.enable(PiiType::PassportNumber),
+                "national_id" => builder = builder.enable(PiiType::NationalId),
+                "address" | "physical_address" => {
+                    builder = builder.enable(PiiType::PhysicalAddress)
+                }
                 _ => eprintln!("Warning: unknown PII type '{}', skipping", type_name),
             }
         }
@@ -189,37 +211,12 @@ fn handle_redact(config: &Config, text: &str, format: &OutputFormat) {
     }
 }
 
-fn is_type_enabled(config: &Config, pii_type: PiiType) -> bool {
-    if config.policy.enabled_types.is_empty() {
-        return true;
-    }
-    let name = pii_type_name(pii_type);
-    config.policy.enabled_types.iter().any(|t| t == name)
-}
-
 fn handle_validate(config: &Config, text: &str, format: &OutputFormat) {
     let redactor = build_redactor(config);
+    let detectors = build_detectors(config);
 
-    let detectors: Vec<Box<dyn PiiDetector>> = vec![
-        Box::new(EmailDetector::new()),
-        Box::new(PhoneNumberDetector::new()),
-        Box::new(SSNDetector::new()),
-        Box::new(CreditCardDetector::new()),
-        Box::new(Ipv4Detector::new()),
-        Box::new(Ipv6Detector::new()),
-    ];
-
-    let mut all_detections = Vec::new();
-    for detector in &detectors {
-        if !is_type_enabled(config, detector.pii_type()) {
-            continue;
-        }
-        let detections = detector.detect(text);
-        all_detections.extend(detections);
-    }
-
-    all_detections.sort_by_key(|d| d.start);
-    all_detections.dedup_by(|a, b| a.start == b.start && a.end == b.end);
+    let multi = auvura_core::detector::MultiDetector::new(detectors);
+    let all_detections = multi.detect(text);
 
     let redacted = redactor.redact(text);
     let has_pii = !all_detections.is_empty();

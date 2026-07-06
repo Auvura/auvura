@@ -358,14 +358,18 @@ The client receives the reconstructed text in real-time. The actual PII never le
 
 ## Detection Types
 
-| Type | Format | Example Redacted |
-|------|--------|-----------------|
-| Email | `user@domain.tld` | `████.███@███████.com` |
-| Phone | Various intl formats | `(███) ███-████` |
-| SSN | `###-##-####` | `███-██-████` |
-| Credit Card | `#### #### #### ####` | `████ ████ ████ 1111` |
-| IPv4 | `192.168.1.1` | `█████████████` |
-| IPv6 | `::ffff:192.168.1.1` | `██████████████████████` |
+| Type | Config Key | Format | Example Redacted |
+|------|-----------|--------|-----------------|
+| Email | `email` | `user@domain.tld` | `████.███@███████.com` |
+| Phone | `phone` | Various intl formats | `(███) ███-████` |
+| SSN | `ssn` | `###-##-####` | `███-██-████` |
+| Credit Card | `credit_card` | `#### #### #### ####` | `████ ████ ████ 1111` |
+| IPv4 | `ipv4` | `192.168.1.1` | `█████████████` |
+| IPv6 | `ipv6` | `::ffff:192.168.1.1` | `██████████████████████` |
+| IBAN | `iban` | `DE89 3704 0044 0532 0130 00` | `DE████████████████30 00` |
+| Passport | `passport` | `AB1234567` | `AB███████` |
+| National ID | `national_id` | Various country formats | `████████████` |
+| Physical Address | `address` | Street, City, State ZIP | `████████████████` |
 
 ### Phone Country Configuration
 
@@ -385,6 +389,19 @@ let detector = PhoneNumberDetector::with_countries(vec!["DE".into(), "FR".into()
 ```
 
 Numbers with international prefix (`+`) are always validated via phonelib regardless of the country list.
+
+### Policy Configuration
+
+Enable or disable specific PII types in `auvura.toml`:
+
+```toml
+[policy]
+enabled_types = ["email", "phone_number", "credit_card", "iban", "passport"]
+```
+
+Valid config keys: `email`, `phone`/`phone_number`, `ssn`, `credit_card`, `ipv4`/`ip_address_v4`, `ipv6`/`ip_address_v6`, `iban`, `passport`/`passport_number`, `national_id`, `address`/`physical_address`.
+
+When `enabled_types` is omitted or empty, all types are enabled by default.
 
 ### CORS Configuration
 

@@ -337,15 +337,19 @@ impl MultiDetector {
 }
 
 /// Returns priority for PII type (higher = more specific)
-/// SSN > CreditCard > PhoneNumber > Email > IpAddress > Other
+/// SSN > CreditCard > IBAN > PhoneNumber > Email > IpAddress > Other
 fn pii_priority(pii_type: PiiType) -> u8 {
     match pii_type {
-        PiiType::Ssn => 4,
-        PiiType::CreditCard => 3,
+        PiiType::Ssn => 5,
+        PiiType::CreditCard => 4,
+        PiiType::Iban => 3,
+        PiiType::PassportNumber => 3,
+        PiiType::NationalId => 3,
         PiiType::PhoneNumber => 2,
         PiiType::Email => 1,
-        PiiType::IpAddressV4 | PiiType::IpAddressV6 => 0,
-        PiiType::Other(_) => 0, // Lowest priority
+        PiiType::IpAddressV4 | PiiType::IpAddressV6 => 1,
+        PiiType::PhysicalAddress => 1,
+        PiiType::Other(_) => 0,
     }
 }
 

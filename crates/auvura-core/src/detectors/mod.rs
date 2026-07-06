@@ -1,6 +1,10 @@
+pub mod address;
 pub mod credit_card;
 pub mod email;
+pub mod iban;
 pub mod ip;
+pub mod national_id;
 pub mod ner;
+pub mod passport;
 pub mod phone_number;
 pub mod ssn;

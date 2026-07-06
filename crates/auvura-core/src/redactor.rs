@@ -166,6 +166,10 @@ impl Redactor {
             PiiType::Ssn => self.redact_ssn_structured(original),
             PiiType::CreditCard => self.redact_credit_card_structured(original),
             PiiType::IpAddressV4 | PiiType::IpAddressV6 => "█".repeat(original.len()),
+            PiiType::Iban => self.redact_iban_structured(original),
+            PiiType::PassportNumber => self.redact_passport_structured(original),
+            PiiType::NationalId => self.redact_national_id_structured(original),
+            PiiType::PhysicalAddress => "█".repeat(original.len()),
             PiiType::Other(_) => "█".repeat(original.len()),
         }
     }
@@ -216,6 +220,80 @@ impl Redactor {
         let mut result = String::new();
         let mut digit_count = 0;
         for c in cc.chars() {
+            if c.is_ascii_digit() {
+                digit_count += 1;
+                if digit_count > digits.len() - 4 {
+                    result.push(c);
+                } else {
+                    result.push('█');
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
+    fn redact_iban_structured(&self, iban: &str) -> String {
+        // Show country code and last 4 chars, redact middle
+        let cleaned: String = iban
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '-')
+            .collect();
+        if cleaned.len() < 8 {
+            return "█".repeat(iban.len());
+        }
+
+        let country = &cleaned[0..2];
+        let last4 = &cleaned[cleaned.len() - 4..];
+        let middle_len = cleaned.len() - 6; // country(2) + check(2) + last4(4)
+
+        let mut result = String::new();
+        result.push_str(country);
+        result.push_str(&"█".repeat(middle_len));
+        result.push_str(last4);
+
+        // Preserve original spacing if any
+        if iban.contains(' ') {
+            result
+                .chars()
+                .collect::<Vec<_>>()
+                .chunks(4)
+                .map(|c| c.iter().collect::<String>())
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            result
+        }
+    }
+
+    fn redact_passport_structured(&self, passport: &str) -> String {
+        // Show leading letters, redact digits
+        let mut result = String::new();
+        let mut found_digit = false;
+        for c in passport.chars() {
+            if c.is_ascii_digit() {
+                found_digit = true;
+                result.push('█');
+            } else if !found_digit {
+                result.push(c);
+            } else {
+                result.push('█');
+            }
+        }
+        result
+    }
+
+    fn redact_national_id_structured(&self, id: &str) -> String {
+        // Show last 4 digits, redact rest
+        let digits: Vec<char> = id.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.len() < 4 {
+            return "█".repeat(id.len());
+        }
+
+        let mut result = String::new();
+        let mut digit_count = 0;
+        for c in id.chars() {
             if c.is_ascii_digit() {
                 digit_count += 1;
                 if digit_count > digits.len() - 4 {

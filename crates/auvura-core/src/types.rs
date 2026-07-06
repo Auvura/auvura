@@ -13,6 +13,14 @@ pub enum PiiType {
     CreditCard,
     IpAddressV4,
     IpAddressV6,
+    /// International Bank Account Number (IBAN)
+    Iban,
+    /// Passport number (various country formats)
+    PassportNumber,
+    /// National identity number (EU, AU, IN, etc.)
+    NationalId,
+    /// Physical street address
+    PhysicalAddress,
     /// For NER-detected entities (names, organizations, locations)
     Other(&'static str), // Label like "PERSON", "ORG", "LOC"
 }
@@ -30,6 +38,10 @@ pub enum PiiTypeConfig {
     CreditCard,
     IpAddressV4,
     IpAddressV6,
+    Iban,
+    PassportNumber,
+    NationalId,
+    PhysicalAddress,
     Other(String),
 }
 
@@ -42,6 +54,10 @@ impl From<PiiType> for PiiTypeConfig {
             PiiType::CreditCard => PiiTypeConfig::CreditCard,
             PiiType::IpAddressV4 => PiiTypeConfig::IpAddressV4,
             PiiType::IpAddressV6 => PiiTypeConfig::IpAddressV6,
+            PiiType::Iban => PiiTypeConfig::Iban,
+            PiiType::PassportNumber => PiiTypeConfig::PassportNumber,
+            PiiType::NationalId => PiiTypeConfig::NationalId,
+            PiiType::PhysicalAddress => PiiTypeConfig::PhysicalAddress,
             PiiType::Other(label) => PiiTypeConfig::Other(label.to_string()),
         }
     }
@@ -58,6 +74,10 @@ impl PiiTypeConfig {
             PiiTypeConfig::CreditCard => Some(PiiType::CreditCard),
             PiiTypeConfig::IpAddressV4 => Some(PiiType::IpAddressV4),
             PiiTypeConfig::IpAddressV6 => Some(PiiType::IpAddressV6),
+            PiiTypeConfig::Iban => Some(PiiType::Iban),
+            PiiTypeConfig::PassportNumber => Some(PiiType::PassportNumber),
+            PiiTypeConfig::NationalId => Some(PiiType::NationalId),
+            PiiTypeConfig::PhysicalAddress => Some(PiiType::PhysicalAddress),
             PiiTypeConfig::Other(_) => None, // Cannot convert back to &'static str
         }
     }
@@ -72,6 +92,10 @@ impl PiiType {
             Self::Ssn => "NIST SP 800-122 §2.1",
             Self::CreditCard => "PCI-DSS v4.0 + GDPR financial data",
             Self::IpAddressV4 | Self::IpAddressV6 => "GDPR Recital 30",
+            Self::Iban => "PSD2 Art.69 + GDPR financial data",
+            Self::PassportNumber => "GDPR Art.4(1) + ICAO 9303",
+            Self::NationalId => "GDPR Art.4(1) + national ID regulations",
+            Self::PhysicalAddress => "GDPR Art.4(1) + CCPA §1798.140(v)",
             Self::Other(_label) => "Contextual PII (NER-detected)",
         }
     }
@@ -85,6 +109,10 @@ impl PiiType {
             Self::CreditCard => "[REDACTED_CC]",
             Self::IpAddressV4 => "[REDACTED_IPv4]",
             Self::IpAddressV6 => "[REDACTED_IPv6]",
+            Self::Iban => "[REDACTED_IBAN]",
+            Self::PassportNumber => "[REDACTED_PASSPORT]",
+            Self::NationalId => "[REDACTED_NATID]",
+            Self::PhysicalAddress => "[REDACTED_ADDRESS]",
             Self::Other(_label) => "[REDACTED_OTHER]",
         }
     }
@@ -92,7 +120,7 @@ impl PiiType {
     /// Returns true if this PII type requires checksum validation
     /// (e.g., Luhn algorithm for credit cards)
     pub fn requires_validation(&self) -> bool {
-        matches!(self, Self::CreditCard | Self::Ssn)
+        matches!(self, Self::CreditCard | Self::Ssn | Self::Iban)
     }
 }
 
@@ -116,6 +144,10 @@ mod tests {
             PiiType::CreditCard,
             PiiType::IpAddressV4,
             PiiType::IpAddressV6,
+            PiiType::Iban,
+            PiiType::PassportNumber,
+            PiiType::NationalId,
+            PiiType::PhysicalAddress,
         ];
         let placeholders: Vec<_> = types.iter().map(|t| t.placeholder()).collect();
         let unique: std::collections::HashSet<_> = placeholders.iter().collect();
@@ -135,6 +167,10 @@ mod tests {
             PiiType::CreditCard,
             PiiType::IpAddressV4,
             PiiType::IpAddressV6,
+            PiiType::Iban,
+            PiiType::PassportNumber,
+            PiiType::NationalId,
+            PiiType::PhysicalAddress,
         ];
         for pii_type in &types {
             let config: PiiTypeConfig = (*pii_type).into();

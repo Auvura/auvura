@@ -45,6 +45,9 @@ pub struct Config {
 
     #[serde(default)]
     pub auth: AuthConfig,
+
+    #[serde(default)]
+    pub audit: AuditConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -329,6 +332,34 @@ impl AuthConfig {
     }
 }
 
+/// Audit logging configuration for GDPR/HIPAA compliance.
+/// When enabled, detection and redaction events are logged.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct AuditConfig {
+    /// Enable audit logging. Defaults to false.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Log destination. "stdout" (default) or "file".
+    #[serde(default = "default_audit_destination")]
+    pub destination: String,
+
+    /// File path for audit logs (only used when destination is "file").
+    #[serde(default)]
+    pub file_path: Option<String>,
+}
+
+fn default_audit_destination() -> String {
+    "stdout".to_string()
+}
+
+impl AuditConfig {
+    /// Returns true if audit logging is configured and enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
 impl Config {
     /// Load config from a TOML file. Missing file returns default config.
     pub fn load(path: &std::path::Path) -> Result<Self, ConfigError> {
@@ -393,7 +424,13 @@ impl Config {
     }
 
     /// Build a Redactor from the policy config
-    pub fn build_redactor(&self) -> auvura_core::redactor::Redactor {
+    ///
+    /// If `audit_logger` is provided, the redactor will log detection and
+    /// redaction events for GDPR/HIPAA compliance.
+    pub fn build_redactor(
+        &self,
+        audit_logger: Option<impl auvura_core::audit::AuditLogger + 'static>,
+    ) -> auvura_core::redactor::Redactor {
         use auvura_core::{
             detectors::{
                 address::AddressDetector,
@@ -482,7 +519,11 @@ impl Config {
             builder = builder.with_allowlist(refs);
         }
 
-        Redactor::new(detectors, builder.build())
+        if let Some(audit_logger) = audit_logger {
+            Redactor::with_audit_logger(detectors, builder.build(), audit_logger)
+        } else {
+            Redactor::new(detectors, builder.build())
+        }
     }
 }
 
@@ -674,7 +715,7 @@ enabled_types = ["email"]
 phone_countries = ["DE"]
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        let redactor = config.build_redactor();
+        let redactor = config.build_redactor(None::<auvura_core::audit::NoopAuditLogger>);
         // German number should be detected
         let result = redactor.redact("DE: +49 30 12345678");
         assert_ne!(result, "DE: +49 30 12345678");

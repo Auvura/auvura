@@ -108,7 +108,10 @@ fn build_detectors(config: &Config) -> Vec<Box<dyn PiiDetector>> {
     ]
 }
 
-fn build_redactor(config: &Config) -> Redactor {
+fn build_redactor(
+    config: &Config,
+    audit_logger: Option<impl auvura_core::audit::AuditLogger + 'static>,
+) -> Redactor {
     let detectors = build_detectors(config);
 
     let mut builder = PolicyBuilder::default();
@@ -157,7 +160,11 @@ fn build_redactor(config: &Config) -> Redactor {
         builder = builder.with_allowlist(refs);
     }
 
-    Redactor::new(detectors, builder.build())
+    if let Some(logger) = audit_logger {
+        Redactor::with_audit_logger(detectors, builder.build(), logger)
+    } else {
+        Redactor::new(detectors, builder.build())
+    }
 }
 
 fn read_input(text: &Option<String>, file: &Option<PathBuf>) -> Result<String, String> {
@@ -192,7 +199,7 @@ fn pii_type_name(pii_type: PiiType) -> &'static str {
 }
 
 fn handle_redact(config: &Config, text: &str, format: &OutputFormat) {
-    let redactor = build_redactor(config);
+    let redactor = build_redactor(config, None::<auvura_core::audit::NoopAuditLogger>);
     let result = redactor.redact(text);
 
     match format {
@@ -212,7 +219,7 @@ fn handle_redact(config: &Config, text: &str, format: &OutputFormat) {
 }
 
 fn handle_validate(config: &Config, text: &str, format: &OutputFormat) {
-    let redactor = build_redactor(config);
+    let redactor = build_redactor(config, None::<auvura_core::audit::NoopAuditLogger>);
     let detectors = build_detectors(config);
 
     let multi = auvura_core::detector::MultiDetector::new(detectors);
@@ -308,7 +315,20 @@ async fn main() {
                 config.server.port = *p;
             }
 
-            let redactor = config.build_redactor();
+            // Set up audit logging if enabled
+            let audit_logger = if config.audit.is_enabled() {
+                let logger = auvura_core::audit::JsonAuditLogger::new();
+                println!("Audit logging enabled (destination: {})", config.audit.destination);
+                Some(logger)
+            } else {
+                None
+            };
+
+            let redactor = if let Some(logger) = audit_logger {
+                config.build_redactor(Some(logger))
+            } else {
+                config.build_redactor(None::<auvura_core::audit::NoopAuditLogger>)
+            };
             let providers = config.build_providers();
 
             if providers.is_empty() {
@@ -441,7 +461,7 @@ mod tests {
     #[test]
     fn test_build_redactor_default_config() {
         let config = test_config();
-        let redactor = build_redactor(&config);
+        let redactor = build_redactor(&config, None::<auvura_core::audit::NoopAuditLogger>);
         let result = redactor.redact("Contact john@example.com");
         assert_ne!(result.as_ref(), "Contact john@example.com");
     }
@@ -450,7 +470,7 @@ mod tests {
     fn test_build_redactor_with_blocklist() {
         let mut config = test_config();
         config.policy.blocklist = vec!["SECRET".to_string()];
-        let redactor = build_redactor(&config);
+        let redactor = build_redactor(&config, None::<auvura_core::audit::NoopAuditLogger>);
         let result = redactor.redact("This is SECRET info");
         assert!(result.contains("██████"));
     }
@@ -459,7 +479,7 @@ mod tests {
     fn test_build_redactor_with_allowlist() {
         let mut config = test_config();
         config.policy.allowlist = vec!["john@example.com".to_string()];
-        let redactor = build_redactor(&config);
+        let redactor = build_redactor(&config, None::<auvura_core::audit::NoopAuditLogger>);
         let result = redactor.redact("Email john@example.com");
         assert!(result.contains("john@example.com"));
     }
@@ -468,7 +488,7 @@ mod tests {
     fn test_build_redactor_disabled_type() {
         let mut config = test_config();
         config.policy.enabled_types = vec!["email".to_string()];
-        let redactor = build_redactor(&config);
+        let redactor = build_redactor(&config, None::<auvura_core::audit::NoopAuditLogger>);
         // Email should be detected
         let result = redactor.redact("Email: test@example.com");
         assert_ne!(result.as_ref(), "Email: test@example.com");

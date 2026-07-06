@@ -6,7 +6,7 @@
 //! the other detectors but useful for catching obvious addresses.
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use regex::Regex;
@@ -118,6 +118,10 @@ impl PiiDetector for AddressDetector {
         PiiType::PhysicalAddress
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::Low
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
@@ -139,6 +143,7 @@ impl PiiDetector for AddressDetector {
 
                 Some(Detection {
                     pii_type: PiiType::PhysicalAddress,
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: candidate.to_string(),

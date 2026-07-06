@@ -7,6 +7,7 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 ## Features
 
 - **PII Detection**: Email, Phone Number, SSN, Credit Card, IP Address, IBAN, Passport, National ID, Physical Address
+- **Confidence Scoring**: Each detection includes a confidence level (High/Medium/Low) based on detection method
 - **Compliance-Ready**: GDPR, HIPAA, PCI-DSS profiles included
 - **Structured Redaction**: Preserves format while masking sensitive data
 - **JSON-Aware Redaction**: Redacts PII inside JSON string values while preserving structure
@@ -141,6 +142,34 @@ println!("{}", json);
 let config: RedactionPolicyConfig = serde_json::from_str(&json).unwrap();
 let restored = RedactionPolicy::from_config(&config);
 ```
+
+#### Confidence Scoring
+
+Each detection includes a confidence level indicating how certain we are that the detected text is PII:
+
+```rust
+use auvura_core::detector::Confidence;
+
+// Confidence levels:
+// - High: regex + checksum/validation (SSN, CreditCard with Luhn, IBAN with mod-97, IP addresses)
+// - Medium: regex pattern only (Email, PhoneNumber, Passport, NationalId)
+// - Low: heuristic/pattern matching (PhysicalAddress)
+
+let detector = detectors::EmailDetector::new();
+assert_eq!(detector.confidence(), Confidence::Medium);
+
+let detector = detectors::SSNDetector::new();
+assert_eq!(detector.confidence(), Confidence::High);
+
+// Access confidence from detection
+let detections = detector.detect("SSN: 123-45-6789");
+assert_eq!(detections[0].confidence, Confidence::High);
+```
+
+Confidence is used as a tiebreaker when resolving overlapping detections:
+- Higher priority PII type wins first
+- If same priority, higher confidence wins
+- If same confidence, longer span wins
 
 #### JSON-Aware Redaction
 
@@ -430,6 +459,7 @@ Test coverage includes:
 - [x] CORS support
 - [x] Per-IP rate limiting
 - [x] Request size limits
+- [x] Confidence scoring for detections (High/Medium/Low)
 - [x] Integration test suite (86 tests across 5 test files)
 - [x] Criterion benchmarks (8 benchmarks)
 - [x] Fuzz targets (3 targets: redactor, JSON redactor, detectors)

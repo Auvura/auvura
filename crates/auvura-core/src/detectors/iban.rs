@@ -7,7 +7,7 @@
 //!   - BBAN (Basic Bank Account Number, length varies by country)
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use regex::Regex;
@@ -106,6 +106,10 @@ impl PiiDetector for IbanDetector {
         PiiType::Iban
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::High
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.pattern
             .find_iter(text)
@@ -143,6 +147,7 @@ impl PiiDetector for IbanDetector {
 
                 Some(Detection {
                     pii_type: PiiType::Iban,
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: candidate.to_string(),

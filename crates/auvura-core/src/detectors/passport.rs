@@ -129,6 +129,7 @@ impl PiiDetector for PassportDetector {
 
                 Some(Detection {
                     pii_type: PiiType::PassportNumber,
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: candidate.to_string(),

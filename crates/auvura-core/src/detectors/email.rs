@@ -61,6 +61,7 @@ impl PiiDetector for EmailDetector {
                 }
                 Some(Detection {
                     pii_type: PiiType::Email,
+                    confidence: self.confidence(),
                     start: m.start(),
                     end: m.end(),
                     original: email.to_string(),

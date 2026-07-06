@@ -2,10 +2,52 @@ use crate::types::PiiType;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use zeroize::Zeroize;
 
+/// Confidence level for a PII detection
+///
+/// Determines how certain we are that the detected text is actually PII.
+/// Used for filtering and overlap resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Confidence {
+    /// High confidence: regex pattern + checksum/validation (e.g., Luhn, mod-97)
+    /// Very few false positives
+    High,
+    /// Medium confidence: regex pattern without checksum validation
+    /// Some false positives possible (e.g., random digit sequences matching phone format)
+    #[default]
+    Medium,
+    /// Low confidence: heuristic or pattern matching
+    /// Higher false positive rate (e.g., addresses based on street type keywords)
+    Low,
+}
+
+impl Confidence {
+    /// Returns numeric value for comparison (higher = more confident)
+    fn value(&self) -> u8 {
+        match self {
+            Confidence::High => 3,
+            Confidence::Medium => 2,
+            Confidence::Low => 1,
+        }
+    }
+}
+
+impl PartialOrd for Confidence {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Confidence {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value().cmp(&other.value())
+    }
+}
+
 /// Detection result with memory safety guarantees
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detection {
     pub pii_type: PiiType,
+    pub confidence: Confidence,
     pub start: usize,     // UTF-8 byte offset (NOT char index)
     pub end: usize,       // UTF-8 byte offset
     pub original: String, // Original text – will be zeroized on drop
@@ -26,6 +68,13 @@ impl Drop for Detection {
 /// Core detection trait – all detectors must implement this
 pub trait PiiDetector: Send + Sync {
     fn pii_type(&self) -> PiiType;
+
+    /// Returns the confidence level for this detector's matches.
+    /// Override this to provide detector-specific confidence.
+    /// Default: Medium (regex-based detection without validation)
+    fn confidence(&self) -> Confidence {
+        Confidence::Medium
+    }
 
     /// Detect PII in text – returns sorted, non-overlapping detections
     ///
@@ -288,8 +337,8 @@ impl MultiDetector {
     }
 
     /// Resolve overlapping detections – keep highest priority PII type
-    /// Priority (higher = more specific): SSN(4) > CreditCard(3) > PhoneNumber(2) > Email(1)
-    /// If same priority, keep the longer span (more specific pattern)
+    /// Priority (higher = more specific): SSN(5) > CreditCard(4) > IBAN/Passport/NatID(3) > PhoneNumber(2) > Email/IP/Address(1) > Other(0)
+    /// Tiebreakers: confidence (higher wins), then longer span
     fn resolve_overlaps(detections: Vec<Detection>) -> Vec<Detection> {
         if detections.is_empty() {
             return detections;
@@ -300,6 +349,7 @@ impl MultiDetector {
             a.start
                 .cmp(&b.start)
                 .then_with(|| pii_priority(b.pii_type).cmp(&pii_priority(a.pii_type)))
+                .then_with(|| b.confidence.cmp(&a.confidence))
                 .then_with(|| (b.end - b.start).cmp(&(a.end - a.start)))
         });
 
@@ -310,13 +360,19 @@ impl MultiDetector {
 
         for i in 1..sorted.len() {
             if sorted[i].start < sorted[current_idx].end {
-                // Overlap detected – keep higher priority (or longer span if same priority)
-                if pii_priority(sorted[i].pii_type) > pii_priority(sorted[current_idx].pii_type)
-                    || (pii_priority(sorted[i].pii_type)
-                        == pii_priority(sorted[current_idx].pii_type)
-                        && (sorted[i].end - sorted[i].start)
-                            > (sorted[current_idx].end - sorted[current_idx].start))
-                {
+                // Overlap detected – keep higher priority (or higher confidence, or longer span)
+                let cur_p = pii_priority(sorted[current_idx].pii_type);
+                let new_p = pii_priority(sorted[i].pii_type);
+                let cur_c = sorted[current_idx].confidence;
+                let new_c = sorted[i].confidence;
+                let cur_len = sorted[current_idx].end - sorted[current_idx].start;
+                let new_len = sorted[i].end - sorted[i].start;
+
+                let dominated = new_p > cur_p
+                    || (new_p == cur_p && new_c > cur_c)
+                    || (new_p == cur_p && new_c == cur_c && new_len > cur_len);
+
+                if dominated {
                     keep[current_idx] = false;
                     current_idx = i;
                     keep[i] = true;
@@ -363,6 +419,9 @@ mod tests {
         fn pii_type(&self) -> PiiType {
             PiiType::Email
         }
+        fn confidence(&self) -> Confidence {
+            Confidence::High
+        }
         fn detect(&self, text: &str) -> Vec<Detection> {
             if let Some(idx) = text.find('@') {
                 // Simplified for test – real detector uses proper regex
@@ -370,6 +429,7 @@ mod tests {
                 let end = text[idx..].find(' ').map_or(text.len(), |i| idx + i);
                 vec![Detection {
                     pii_type: self.pii_type(),
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: text[start..end].to_string(),
@@ -402,12 +462,14 @@ mod tests {
     fn test_resolve_overlaps_prefers_longer_match() {
         let short = Detection {
             pii_type: PiiType::PhoneNumber,
+            confidence: Confidence::Medium,
             start: 10,
             end: 20,
             original: "1234567890".to_string(),
         };
         let long = Detection {
             pii_type: PiiType::Ssn,
+            confidence: Confidence::High,
             start: 12,
             end: 25,
             original: "456789012".to_string(),
@@ -420,16 +482,18 @@ mod tests {
 
     #[test]
     fn test_resolve_overlaps_priority_over_length() {
-        // SSN has higher priority (4) than PhoneNumber (2)
+        // SSN has higher priority (5) than PhoneNumber (2)
         // Even if PhoneNumber is longer, SSN should win
         let phone = Detection {
             pii_type: PiiType::PhoneNumber,
+            confidence: Confidence::Medium,
             start: 10,
             end: 25, // longer span
             original: "123-456-7890".to_string(),
         };
         let ssn = Detection {
             pii_type: PiiType::Ssn,
+            confidence: Confidence::High,
             start: 12,
             end: 23, // shorter span but higher priority
             original: "123-45-6789".to_string(),
@@ -438,6 +502,29 @@ mod tests {
         let resolved = MultiDetector::resolve_overlaps(vec![phone, ssn]);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].pii_type, PiiType::Ssn); // Higher priority wins
+    }
+
+    #[test]
+    fn test_resolve_overlaps_confidence_tiebreaker() {
+        // Same PII type and overlapping range, but different confidence
+        let low = Detection {
+            pii_type: PiiType::Email,
+            confidence: Confidence::Low,
+            start: 10,
+            end: 25,
+            original: "user@example.com".to_string(),
+        };
+        let high = Detection {
+            pii_type: PiiType::Email,
+            confidence: Confidence::High,
+            start: 12,
+            end: 23,
+            original: "er@example".to_string(),
+        };
+
+        let resolved = MultiDetector::resolve_overlaps(vec![low, high]);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].confidence, Confidence::High);
     }
 
     #[test]
@@ -476,5 +563,58 @@ mod tests {
         let multi = MultiDetector::new(detectors);
         assert!(multi.ac.is_none());
         assert!(multi.detect("no pii here").is_empty());
+    }
+
+    #[test]
+    fn test_confidence_ordering() {
+        assert!(Confidence::High > Confidence::Medium);
+        assert!(Confidence::Medium > Confidence::Low);
+        assert!(Confidence::High > Confidence::Low);
+    }
+
+    #[test]
+    fn test_confidence_default_is_medium() {
+        assert_eq!(Confidence::default(), Confidence::Medium);
+    }
+
+    #[test]
+    fn test_detectors_have_correct_confidence() {
+        use crate::detectors::{
+            address::AddressDetector,
+            credit_card::CreditCardDetector,
+            email::EmailDetector,
+            iban::IbanDetector,
+            ip::{Ipv4Detector, Ipv6Detector},
+            national_id::NationalIdDetector,
+            passport::PassportDetector,
+            phone_number::PhoneNumberDetector,
+            ssn::SSNDetector,
+        };
+
+        // High confidence: regex + validation
+        assert_eq!(SSNDetector::new().confidence(), Confidence::High);
+        assert_eq!(CreditCardDetector::new().confidence(), Confidence::High);
+        assert_eq!(IbanDetector::new().confidence(), Confidence::High);
+        assert_eq!(Ipv4Detector::new().confidence(), Confidence::High);
+        assert_eq!(Ipv6Detector::new().confidence(), Confidence::High);
+
+        // Medium confidence: regex only
+        assert_eq!(EmailDetector::new().confidence(), Confidence::Medium);
+        assert_eq!(PhoneNumberDetector::new().confidence(), Confidence::Medium);
+        assert_eq!(PassportDetector::new().confidence(), Confidence::Medium);
+        assert_eq!(NationalIdDetector::new().confidence(), Confidence::Medium);
+
+        // Low confidence: heuristic
+        assert_eq!(AddressDetector::new().confidence(), Confidence::Low);
+    }
+
+    #[test]
+    fn test_detection_includes_confidence() {
+        use crate::detectors::email::EmailDetector;
+
+        let detector = EmailDetector::new();
+        let detections = detector.detect("Contact john@example.com");
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].confidence, Confidence::Medium);
     }
 }

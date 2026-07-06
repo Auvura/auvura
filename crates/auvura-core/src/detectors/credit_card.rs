@@ -10,7 +10,7 @@
 //! https://docs.paymentcardindustry.com/virtual-terminal/test-card-numbers/
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use regex::Regex;
@@ -173,6 +173,10 @@ impl PiiDetector for CreditCardDetector {
         PiiType::CreditCard
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::High
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
@@ -214,6 +218,7 @@ impl PiiDetector for CreditCardDetector {
             if !validate || (Self::passes_luhn(&cleaned) && Self::is_valid_card_number(&cleaned)) {
                 detections.push(Detection {
                     pii_type: PiiType::CreditCard,
+                    confidence: self.confidence(),
                     start,
                     end,
                     original: candidate.to_string(),

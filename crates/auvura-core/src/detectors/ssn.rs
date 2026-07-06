@@ -9,7 +9,7 @@
 //! - Word boundary enforcement to prevent false positives
 
 use crate::{
-    detector::{Detection, PiiDetector},
+    detector::{Confidence, Detection, PiiDetector},
     types::PiiType,
 };
 use regex::Regex;
@@ -84,6 +84,10 @@ impl PiiDetector for SSNDetector {
         PiiType::Ssn
     }
 
+    fn confidence(&self) -> Confidence {
+        Confidence::High
+    }
+
     fn detect(&self, text: &str) -> Vec<Detection> {
         self.detect_with_validation(text, true)
     }
@@ -98,6 +102,7 @@ impl PiiDetector for SSNDetector {
                 if !validate || self.is_valid_ssn(area, group, serial) {
                     detections.push(Detection {
                         pii_type: PiiType::Ssn,
+                        confidence: self.confidence(),
                         start: m.start(),
                         end: m.end(),
                         original: ssn_str.to_string(),

@@ -1033,7 +1033,7 @@ mod tests {
         let adapter = OllamaAdapter;
         let headers = adapter.required_headers("");
 
-        assert!(headers.get("Authorization").is_none());
+        assert!(!headers.contains_key("Authorization"));
         assert_eq!(headers.get("Content-Type").unwrap(), "application/json");
     }
 

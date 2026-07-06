@@ -19,6 +19,7 @@ use auvura_proxy::config::Config;
 use clap::{Parser, Subcommand};
 use std::io::Read;
 use std::path::PathBuf;
+use tracing::{info, warn};
 
 #[derive(Parser)]
 #[command(
@@ -275,12 +276,21 @@ fn handle_validate(config: &Config, text: &str, format: &OutputFormat) {
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .init();
+
     let cli = Cli::parse();
 
     let config = match Config::load(cli.config.as_path()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            tracing::error!(error = %e, "Failed to load config");
             std::process::exit(1);
         }
     };
@@ -290,7 +300,7 @@ async fn main() {
             let input = match read_input(text, file) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    tracing::error!(error = %e, "Failed to read input");
                     std::process::exit(1);
                 }
             };
@@ -300,7 +310,7 @@ async fn main() {
             let input = match read_input(text, file) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    tracing::error!(error = %e, "Failed to read input");
                     std::process::exit(1);
                 }
             };
@@ -318,7 +328,10 @@ async fn main() {
             // Set up audit logging if enabled
             let audit_logger = if config.audit.is_enabled() {
                 let logger = auvura_core::audit::JsonAuditLogger::new();
-                println!("Audit logging enabled (destination: {})", config.audit.destination);
+                info!(
+                    destination = %config.audit.destination,
+                    "Audit logging enabled"
+                );
                 Some(logger)
             } else {
                 None
@@ -332,9 +345,7 @@ async fn main() {
             let providers = config.build_providers();
 
             if providers.is_empty() {
-                eprintln!(
-                    "Warning: no providers configured. Set API keys in config or environment."
-                );
+                warn!("No providers configured. Set API keys in config or environment.");
             }
 
             let app_state = std::sync::Arc::new(auvura_proxy::AppConfig {
@@ -352,10 +363,10 @@ async fn main() {
             let auth_state = if config.auth.is_enabled() {
                 let keys = config.auth.resolve_keys();
                 if keys.is_empty() {
-                    eprintln!("Warning: authentication enabled but no valid API keys configured");
+                    warn!("Authentication enabled but no valid API keys configured");
                     None
                 } else {
-                    println!("Authentication enabled with {} API key(s)", keys.len());
+                    info!(key_count = keys.len(), "Authentication enabled");
                     Some(auvura_proxy::auth::AuthState::new(keys))
                 }
             } else {
@@ -370,7 +381,7 @@ async fn main() {
                     .parse()
                     .expect("Invalid listen address");
 
-            println!("Auvura Proxy listening on {}", addr);
+            info!(addr = %addr, "Server starting");
 
             let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
@@ -383,10 +394,10 @@ async fn main() {
 
                 tokio::select! {
                     _ = ctrl_c => {
-                        println!("\nReceived SIGINT, shutting down gracefully...");
+                        info!("Received SIGINT, shutting down gracefully...");
                     }
                     _ = sigterm.recv() => {
-                        println!("\nReceived SIGTERM, shutting down gracefully...");
+                        info!("Received SIGTERM, shutting down gracefully...");
                     }
                 }
             };
@@ -396,7 +407,7 @@ async fn main() {
                 .await
                 .unwrap();
 
-            println!("Shutdown complete");
+            info!("Shutdown complete");
         }
     }
 }

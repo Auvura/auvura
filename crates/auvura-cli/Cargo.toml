@@ -22,3 +22,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

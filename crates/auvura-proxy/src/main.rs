@@ -77,5 +77,27 @@ async fn main() {
     println!("Auvura Proxy listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    // Graceful shutdown: wait for SIGTERM or SIGINT
+    let shutdown_signal = async {
+        let ctrl_c = tokio::signal::ctrl_c();
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+
+        tokio::select! {
+            _ = ctrl_c => {
+                println!("\nReceived SIGINT, shutting down gracefully...");
+            }
+            _ = sigterm.recv() => {
+                println!("\nReceived SIGTERM, shutting down gracefully...");
+            }
+        }
+    };
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+        .unwrap();
+
+    println!("Shutdown complete");
 }

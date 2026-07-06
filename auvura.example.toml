@@ -14,6 +14,30 @@ api_key_env = "OPENAI_API_KEY"
 [providers.anthropic]
 api_key_env = "ANTHROPIC_API_KEY"
 
+# Google Gemini
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+
+# Mistral AI
+[providers.mistral]
+api_key_env = "MISTRAL_API_KEY"
+
+# Cohere
+[providers.cohere]
+api_key_env = "COHERE_API_KEY"
+
+# Azure OpenAI (uses api-key header instead of Bearer token)
+[providers.azure]
+api_key_env = "AZURE_API_KEY"
+
+# AWS Bedrock (simplified auth - full SigV4 signing recommended for production)
+[providers.bedrock]
+api_key_env = "AWS_BEDROCK_API_KEY"
+
+# Ollama (local inference - no API key needed)
+[providers.ollama]
+api_key = ""
+
 # Redaction policy (optional — defaults to detecting all core PII types).
 # [policy]
 # enabled_types = ["email", "phone", "ssn", "credit_card", "ipv4", "ipv6"]

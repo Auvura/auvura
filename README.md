@@ -13,7 +13,7 @@ Auvura is a Rust workspace that provides **PII (Personally Identifiable Informat
 - **JSON-Aware Redaction**: Redacts PII inside JSON string values while preserving structure
 - **Streaming Redaction**: Real-time PII redaction for async text streams
 - **Memory Safe**: Uses `zeroize` crate to securely erase detections from memory
-- **Provider-Agnostic Proxy**: OpenAI-compatible endpoint that forwards to any AI provider
+- **Provider-Agnostic Proxy**: OpenAI-compatible endpoint that forwards to any AI provider (OpenAI, Anthropic, Gemini, Mistral, Cohere, Azure, Bedrock, Ollama)
 - **High Performance**: Built in Rust with zero-copy optimizations
 
 ## Project Structure
@@ -281,6 +281,51 @@ curl http://localhost:3000/v1/chat/completions \
     "provider": "anthropic"
   }'
 
+# Google Gemini
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-pro",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "gemini"
+  }'
+
+# Mistral AI
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mistral-large-latest",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "mistral"
+  }'
+
+# Cohere
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "command-r-plus",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "cohere"
+  }'
+
+# Azure OpenAI
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "azure"
+  }'
+
+# Ollama (local inference)
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "messages": [{"role": "user", "content": "My email is john@example.com"}],
+    "provider": "ollama"
+  }'
+
 # SSE streaming endpoint (real-time token-by-token response)
 curl -N http://localhost:3000/v1/chat/completions/stream \
   -H "Content-Type: application/json" \
@@ -409,7 +454,7 @@ Oversized payloads receive `413 Payload Too Large`.
 ## Testing
 
 ```bash
-# Run all tests (340+ tests)
+# Run all tests (400+ tests)
 cargo test --workspace
 
 # Run unit tests only
@@ -430,7 +475,7 @@ cargo +nightly fuzz run fuzz_detectors
 ```
 
 Test coverage includes:
-- **Unit tests**: PII detectors, redactor, policy, JSON redaction, streaming redaction (218 core + 61 proxy + 16 CLI)
+- **Unit tests**: PII detectors, redactor, policy, JSON redaction, streaming redaction, provider adapters (223 core + 91 proxy + 16 CLI)
 - **Integration tests**: End-to-end redaction pipeline, JSON structure preservation, streaming, policy round-trips, edge cases (86 tests in `auvura-tests`)
 - **Fuzz targets**: Redactor, JSON redactor, individual detectors — test for panics and invalid output on arbitrary input
 - **Benchmarks**: Detection speed, redaction throughput, JSON redaction, no-PII passthrough
@@ -451,6 +496,7 @@ Test coverage includes:
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)
 - [x] Aho-Corasick multi-pattern optimization for `MultiDetector`
 - [x] Proxy configuration via TOML file + CLI args
+- [x] Multiple provider adapters (OpenAI, Anthropic, Gemini, Mistral, Cohere, Azure, Bedrock, Ollama)
 - [ ] BERT-based NER (`ner` feature flag — placeholder)
 - [x] CLI binary (`redact`, `validate`, `serve`)
 - [x] JSON-structure-aware redaction (`JsonRedactor`)

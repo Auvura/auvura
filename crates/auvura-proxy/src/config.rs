@@ -310,6 +310,19 @@ impl Config {
             let adapter: Box<dyn crate::provider::ProviderAdapter> = match name.as_str() {
                 "openai" => Box::new(crate::provider::OpenAIAdapter),
                 "anthropic" => Box::new(crate::provider::AnthropicAdapter),
+                "gemini" | "google" => Box::new(crate::provider::GeminiAdapter),
+                "mistral" | "mistralai" => Box::new(crate::provider::MistralAdapter),
+                "cohere" => Box::new(crate::provider::CohereAdapter),
+                "azure" | "azure_openai" => Box::new(crate::provider::AzureOpenAIAdapter::new(
+                    String::new(),
+                    String::new(),
+                    "2024-02-01".to_string(),
+                )),
+                "bedrock" | "aws" => Box::new(crate::provider::AWSBedrockAdapter::new(
+                    String::new(),
+                    String::new(),
+                )),
+                "ollama" | "vllm" => Box::new(crate::provider::OllamaAdapter),
                 _ => {
                     eprintln!("Warning: unknown provider '{}', skipping", name);
                     continue;
@@ -459,6 +472,43 @@ api_key = "sk-ant-test"
             config.providers["anthropic"].api_key,
             Some("sk-ant-test".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_all_providers() {
+        let toml_str = r#"
+[providers.openai]
+api_key_env = "OPENAI_API_KEY"
+
+[providers.anthropic]
+api_key = "sk-ant-test"
+
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+
+[providers.mistral]
+api_key_env = "MISTRAL_API_KEY"
+
+[providers.cohere]
+api_key_env = "COHERE_API_KEY"
+
+[providers.azure]
+api_key_env = "AZURE_API_KEY"
+
+[providers.bedrock]
+api_key_env = "AWS_API_KEY"
+
+[providers.ollama]
+api_key = ""
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.providers.len(), 8);
+        assert_eq!(config.providers["gemini"].api_key_env, "GEMINI_API_KEY");
+        assert_eq!(config.providers["mistral"].api_key_env, "MISTRAL_API_KEY");
+        assert_eq!(config.providers["cohere"].api_key_env, "COHERE_API_KEY");
+        assert_eq!(config.providers["azure"].api_key_env, "AZURE_API_KEY");
+        assert_eq!(config.providers["bedrock"].api_key_env, "AWS_API_KEY");
+        assert_eq!(config.providers["ollama"].api_key, Some(String::new()));
     }
 
     #[test]

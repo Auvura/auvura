@@ -232,6 +232,6 @@ mod tests {
         let detector = PassportDetector::new();
         let detections = detector
             .detect("Travel Document: 987654321\nPassport Number: K98765432\nIssued: 2020-01-01");
-        assert!(detections.len() >= 1);
+        assert!(!detections.is_empty());
     }
 }

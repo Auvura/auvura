@@ -18,8 +18,8 @@ repository = "https://github.com/Auvura/auvura"
 # Web & Proxy
 axum = "0.8.8"
 tokio = { version = "1.49.0", features = ["full"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6.8", features = ["full"] }
+tower = { version = "0.5" }
+tower-http = { version = "0.6.8", features = ["cors", "limit"] }
 reqwest = { version = "0.13.1", features = ["json", "stream"] }
 
 # Data & ML

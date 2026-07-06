@@ -1,9 +1,11 @@
 use crate::{
+    audit::{AuditEvent, AuditLogger, NoopAuditLogger},
     detector::{Detection, MultiDetector, PiiDetector},
     policy::RedactionPolicy,
     types::PiiType,
 };
 use std::borrow::Cow;
+use std::sync::Arc;
 
 /// Helper enum to track what kind of redaction to apply at a span
 enum RedactionKind<'a> {
@@ -15,6 +17,7 @@ enum RedactionKind<'a> {
 pub struct Redactor {
     detector: MultiDetector,
     policy: RedactionPolicy,
+    audit_logger: Arc<dyn AuditLogger>,
 }
 
 /// Check if a match at `start..end` in `text` is at a word boundary.
@@ -32,7 +35,37 @@ impl Redactor {
         Self {
             detector: MultiDetector::new(detectors),
             policy,
+            audit_logger: Arc::new(NoopAuditLogger),
         }
+    }
+
+    /// Create a new redactor with an audit logger for compliance logging.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use auvura_core::redactor::Redactor;
+    /// use auvura_core::audit::JsonAuditLogger;
+    /// use auvura_core::policy::RedactionPolicy;
+    ///
+    /// let logger = JsonAuditLogger::new();
+    /// let redactor = Redactor::with_audit_logger(vec![], RedactionPolicy::default(), logger);
+    /// ```
+    pub fn with_audit_logger(
+        detectors: Vec<Box<dyn PiiDetector>>,
+        policy: RedactionPolicy,
+        audit_logger: impl AuditLogger + 'static,
+    ) -> Self {
+        Self {
+            detector: MultiDetector::new(detectors),
+            policy,
+            audit_logger: Arc::new(audit_logger),
+        }
+    }
+
+    /// Get a reference to the audit logger.
+    pub fn audit_logger(&self) -> &dyn AuditLogger {
+        self.audit_logger.as_ref()
     }
 
     /// Redact PII from text – returns Cow<str> for zero-copy optimization
@@ -95,6 +128,11 @@ impl Redactor {
 
         // Step 5: If nothing to redact, return original
         if filtered_detections.is_empty() && blocklist_spans.is_empty() {
+            self.audit_logger.log(AuditEvent::RequestProcessed {
+                had_pii: false,
+                detection_count: 0,
+                redacted: false,
+            });
             return Cow::Borrowed(text);
         }
 
@@ -122,6 +160,8 @@ impl Redactor {
             match kind {
                 RedactionKind::Pii(detection) => {
                     let redacted = self.redact_structured(&detection.original, detection.pii_type);
+                    self.audit_logger
+                        .log(AuditEvent::from_detection(detection, &redacted));
                     result.push_str(&redacted);
                 }
                 RedactionKind::Blocklist => {
@@ -135,6 +175,13 @@ impl Redactor {
         if last_idx < text.len() {
             result.push_str(&text[last_idx..]);
         }
+
+        // Log the request processed event
+        self.audit_logger.log(AuditEvent::RequestProcessed {
+            had_pii: !filtered_detections.is_empty(),
+            detection_count: filtered_detections.len(),
+            redacted: true,
+        });
 
         Cow::Owned(result)
     }

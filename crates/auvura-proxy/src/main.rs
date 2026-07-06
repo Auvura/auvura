@@ -20,7 +20,23 @@ async fn main() {
         }
     };
 
-    let redactor = config.build_redactor();
+    // Set up audit logging if enabled
+    let audit_logger = if config.audit.is_enabled() {
+        let logger = auvura_core::audit::JsonAuditLogger::new();
+        println!(
+            "Audit logging enabled (destination: {})",
+            config.audit.destination
+        );
+        Some(logger)
+    } else {
+        None
+    };
+
+    let redactor = if let Some(logger) = audit_logger {
+        config.build_redactor(Some(logger))
+    } else {
+        config.build_redactor(None::<auvura_core::audit::NoopAuditLogger>)
+    };
     let providers = config.build_providers();
 
     if providers.is_empty() {

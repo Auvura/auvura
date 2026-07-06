@@ -27,6 +27,7 @@ auvura/
 │   │   │   ├── detector.rs     # Detector trait + MultiDetector
 │   │   │   ├── policy.rs       # Redaction policies + compliance profiles
 │   │   │   ├── redactor.rs     # Core redaction engine
+│   │   │   ├── audit.rs        # Structured audit logging (GDPR/HIPAA)
 │   │   │   ├── json.rs         # JSON-structure-aware redaction
 │   │   │   ├── stream.rs       # Streaming redaction for async pipelines
 │   │   │   └── detectors/      # Individual detectors
@@ -473,6 +474,31 @@ max_body_bytes = 10485760   # 10 MB (default)
 
 Oversized payloads receive `413 Payload Too Large`.
 
+### Audit Logging
+
+Structured audit logging for GDPR/HIPAA compliance. Records detection and redaction events with timestamps, PII types, and redacted forms. **Disabled by default**.
+
+In `auvura.toml`:
+
+```toml
+[audit]
+enabled = true
+destination = "stdout"   # "stdout" (default) or "file"
+# file_path = "/var/log/auvura/audit.jsonl"  # Only used when destination is "file"
+```
+
+When enabled, each redaction request logs:
+- **Detection events**: PII type, confidence level, byte offsets, redacted form
+- **Request events**: Whether PII was found, detection count, whether redaction occurred
+
+Example output:
+```json
+{"timestamp":"2024-01-15T10:30:00Z","event":"detection","pii_type":"email","confidence":"medium","start":15,"end":35,"original_len":20,"redacted_form":"████.███@███████.com"}
+{"timestamp":"2024-01-15T10:30:00Z","event":"request_processed","had_pii":true,"detection_count":1,"redacted":true}
+```
+
+For production, implement the `AuditLogger` trait to send events to your logging infrastructure.
+
 ## How It Works
 
 1. **Detection**: Regex-based detectors find PII patterns in text
@@ -551,6 +577,7 @@ Test coverage includes:
 - [x] Per-IP rate limiting
 - [x] Request size limits
 - [x] Confidence scoring for detections (High/Medium/Low)
+- [x] Structured audit logging for GDPR/HIPAA compliance
 - [x] Integration test suite (86 tests across 5 test files)
 - [x] Criterion benchmarks (8 benchmarks)
 - [x] Fuzz targets (3 targets: redactor, JSON redactor, detectors)

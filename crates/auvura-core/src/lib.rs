@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod detector;
 pub mod detectors;
 pub mod json;

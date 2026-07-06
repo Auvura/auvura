@@ -577,6 +577,7 @@ Test coverage includes:
 - [x] CORS support
 - [x] Per-IP rate limiting
 - [x] Request size limits
+- [x] Graceful shutdown (SIGTERM/SIGINT handling, in-flight requests complete)
 - [x] Confidence scoring for detections (High/Medium/Low)
 - [x] Structured audit logging for GDPR/HIPAA compliance
 - [x] Integration test suite (86 tests across 5 test files)

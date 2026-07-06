@@ -396,9 +396,13 @@ impl Config {
     pub fn build_redactor(&self) -> auvura_core::redactor::Redactor {
         use auvura_core::{
             detectors::{
+                address::AddressDetector,
                 credit_card::CreditCardDetector,
                 email::EmailDetector,
+                iban::IbanDetector,
                 ip::{Ipv4Detector, Ipv6Detector},
+                national_id::NationalIdDetector,
+                passport::PassportDetector,
                 phone_number::PhoneNumberDetector,
                 ssn::SSNDetector,
             },
@@ -422,6 +426,10 @@ impl Config {
             Box::new(CreditCardDetector::new()),
             Box::new(Ipv4Detector::new()),
             Box::new(Ipv6Detector::new()),
+            Box::new(IbanDetector::new()),
+            Box::new(PassportDetector::new()),
+            Box::new(NationalIdDetector::new()),
+            Box::new(AddressDetector::new()),
         ];
 
         let mut builder = PolicyBuilder::default();
@@ -436,17 +444,29 @@ impl Config {
                 PiiType::CreditCard,
                 PiiType::IpAddressV4,
                 PiiType::IpAddressV6,
+                PiiType::Iban,
+                PiiType::PassportNumber,
+                PiiType::NationalId,
+                PiiType::PhysicalAddress,
             ] {
                 builder = builder.disable(*pii_type);
             }
             for type_name in &self.policy.enabled_types {
                 match type_name.as_str() {
                     "email" => builder = builder.enable(PiiType::Email),
-                    "phone" => builder = builder.enable(PiiType::PhoneNumber),
+                    "phone" | "phone_number" => builder = builder.enable(PiiType::PhoneNumber),
                     "ssn" => builder = builder.enable(PiiType::Ssn),
                     "credit_card" => builder = builder.enable(PiiType::CreditCard),
-                    "ipv4" => builder = builder.enable(PiiType::IpAddressV4),
-                    "ipv6" => builder = builder.enable(PiiType::IpAddressV6),
+                    "ipv4" | "ip_address_v4" => builder = builder.enable(PiiType::IpAddressV4),
+                    "ipv6" | "ip_address_v6" => builder = builder.enable(PiiType::IpAddressV6),
+                    "iban" => builder = builder.enable(PiiType::Iban),
+                    "passport" | "passport_number" => {
+                        builder = builder.enable(PiiType::PassportNumber)
+                    }
+                    "national_id" => builder = builder.enable(PiiType::NationalId),
+                    "address" | "physical_address" => {
+                        builder = builder.enable(PiiType::PhysicalAddress)
+                    }
                     _ => eprintln!("Warning: unknown PII type '{}', skipping", type_name),
                 }
             }

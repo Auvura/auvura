@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use tracing::{info, info_span, Instrument};
 use uuid::Uuid;
 
 pub type ProviderMap = HashMap<String, (Box<dyn provider::ProviderAdapter>, String)>;
@@ -146,12 +147,38 @@ pub fn app_router(
         ));
     }
 
+    // Request tracing middleware
+    router = router.layer(axum::middleware::from_fn(request_tracing_middleware));
+
     // CORS (applied last so it wraps everything)
     if let Some(cors) = cors {
         router = router.layer(cors);
     }
 
     router
+}
+
+/// Middleware that adds tracing spans to requests for observability.
+async fn request_tracing_middleware(
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> impl IntoResponse {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let span = info_span!(
+        "request",
+        method = %method,
+        path = %uri,
+    );
+
+    async move {
+        let response = next.run(request).await;
+        let status = response.status();
+        info!(status = %status, "Request completed");
+        response
+    }
+    .instrument(span)
+    .await
 }
 
 /// Health check endpoint for load balancers and monitoring.

@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(json["object"], "list");
         assert!(json["data"].is_array());
         // Should have at least one model (the mock provider)
-        assert!(json["data"].as_array().unwrap().len() >= 1);
+        assert!(!json["data"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -78,7 +78,14 @@ async fn main() {
         None
     };
 
-    let app = auvura_proxy::app_router(app_state, cors, rate_limiter, max_body_bytes, auth_state);
+    let app = auvura_proxy::app_router(
+        app_state,
+        cors,
+        rate_limiter,
+        max_body_bytes,
+        auth_state,
+        Some(Arc::new(auvura_proxy::metrics::MetricsState::new())),
+    );
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port)
         .parse()

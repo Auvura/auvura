@@ -46,6 +46,10 @@ pin-project-lite = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# Metrics & Observability
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
 

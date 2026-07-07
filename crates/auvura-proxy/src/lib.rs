@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod config;
+pub mod metrics;
 pub mod provider;
 pub mod rate_limit;
 
@@ -114,6 +115,7 @@ pub fn app_router(
     rate_limiter: Option<rate_limit::RateLimiter>,
     max_body_bytes: usize,
     auth_state: Option<auth::AuthState>,
+    metrics_state: Option<Arc<metrics::MetricsState>>,
 ) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
@@ -121,6 +123,11 @@ pub fn app_router(
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions/stream", post(chat_completions_stream))
         .with_state(state);
+
+    // Add metrics endpoint if metrics are enabled
+    if let Some(metrics) = metrics_state.clone() {
+        router = router.merge(metrics::metrics_router(metrics));
+    }
 
     // Request body size limit
     if max_body_bytes > 0 {
@@ -148,7 +155,10 @@ pub fn app_router(
     }
 
     // Request tracing middleware
-    router = router.layer(axum::middleware::from_fn(request_tracing_middleware));
+    router = router.layer(axum::middleware::from_fn_with_state(
+        metrics_state,
+        request_tracing_middleware,
+    ));
 
     // CORS (applied last so it wraps everything)
     if let Some(cors) = cors {
@@ -158,23 +168,34 @@ pub fn app_router(
     router
 }
 
-/// Middleware that adds tracing spans to requests for observability.
+/// Middleware that adds tracing spans and records metrics for requests.
 async fn request_tracing_middleware(
+    state: State<Option<Arc<metrics::MetricsState>>>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> impl IntoResponse {
-    let method = request.method().clone();
+    let method = request.method().clone().to_string();
     let uri = request.uri().clone();
+    let path = uri.path().to_string();
+    let timer = metrics::RequestTimer::start();
+
     let span = info_span!(
         "request",
         method = %method,
-        path = %uri,
+        path = %path,
     );
 
     async move {
         let response = next.run(request).await;
-        let status = response.status();
-        info!(status = %status, "Request completed");
+        let status = response.status().as_u16();
+        let duration_secs = timer.elapsed_secs();
+
+        // Record metrics if available
+        if let Some(_metrics) = &*state {
+            metrics::MetricsState::record_request(&method, &path, status, duration_secs);
+        }
+
+        info!(status = status, duration_secs = duration_secs, "Request completed");
         response
     }
     .instrument(span)
@@ -290,6 +311,13 @@ pub async fn chat_completions(
         }
     }
 
+    // Record PII detection metrics
+    if token_counter > 0 {
+        for _ in 0..token_counter {
+            metrics::MetricsState::record_pii_detection("message");
+        }
+    }
+
     let provider_name = request
         .get("provider")
         .and_then(|p| p.as_str())
@@ -297,6 +325,7 @@ pub async fn chat_completions(
         .to_lowercase();
 
     if let Some((adapter, api_key)) = state.providers.get(&provider_name) {
+        metrics::MetricsState::record_provider_request(&provider_name);
         let provider_request = adapter.translate_request(&strip_internal_fields(&request));
 
         let url = format!("{}/{}", adapter.base_url(), adapter.endpoint_path());
@@ -339,6 +368,7 @@ pub async fn chat_completions(
 
                     (StatusCode::OK, Json(standard_response))
                 } else {
+                    metrics::MetricsState::record_provider_error(&provider_name, "parse_error");
                     (
                         StatusCode::BAD_GATEWAY,
                         Json(Value::Object(serde_json::Map::from_iter(vec![(
@@ -348,13 +378,16 @@ pub async fn chat_completions(
                     )
                 }
             }
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                Json(Value::Object(serde_json::Map::from_iter(vec![(
-                    "error".to_string(),
-                    Value::String(format!("Provider request failed: {}", e)),
-                )]))),
-            ),
+            Err(e) => {
+                metrics::MetricsState::record_provider_error(&provider_name, "request_error");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(Value::Object(serde_json::Map::from_iter(vec![(
+                        "error".to_string(),
+                        Value::String(format!("Provider request failed: {}", e)),
+                    )]))),
+                )
+            }
         }
     } else {
         (
@@ -726,7 +759,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_check_returns_ok() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -750,7 +783,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_models_returns_providers() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -784,7 +817,7 @@ mod tests {
             http_client: Client::new(),
             context_store: std::sync::Arc::new(DashMap::new()),
         });
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -809,7 +842,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_completions_unknown_provider() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let request = serde_json::json!({
             "model": "gpt-4",
@@ -855,7 +888,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -902,7 +935,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         // Send message with PII - email should be tokenized
         let request = serde_json::json!({
@@ -940,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_unknown_provider_returns_sse_error() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -987,7 +1020,7 @@ mod tests {
             .await;
 
         let config = test_config_with_url(&mock_server.uri());
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let request = serde_json::json!({
             "model": "test-model",
@@ -1042,7 +1075,7 @@ mod tests {
             .allow_origin(["https://app.example.com".parse().unwrap()])
             .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
             .allow_headers([axum::http::header::CONTENT_TYPE]);
-        let app = app_router(config, Some(cors), None, 0, None);
+        let app = app_router(config, Some(cors), None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1072,7 +1105,7 @@ mod tests {
     #[tokio::test]
     async fn test_cors_no_layer_no_headers() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1103,7 +1136,7 @@ mod tests {
 
         let config = test_config_with_url("http://localhost:0");
         let limiter = RateLimiter::new(2, 2); // 2 req/s, burst of 2
-        let app = app_router(config, None, Some(limiter), 0, None);
+        let app = app_router(config, None, Some(limiter), 0, None, None);
 
         let make_request = || {
             let app = app.clone();
@@ -1148,7 +1181,7 @@ mod tests {
 
         let config = test_config_with_url("http://localhost:0");
         let limiter = RateLimiter::new(1, 1); // 1 req/s, burst of 1
-        let app = app_router(config, None, Some(limiter), 0, None);
+        let app = app_router(config, None, Some(limiter), 0, None, None);
 
         let make_request = |ip: &str| {
             let app = app.clone();
@@ -1195,7 +1228,7 @@ mod tests {
     async fn test_request_size_limit_rejects_oversized() {
         let config = test_config_with_url("http://localhost:0");
         // 100 byte limit
-        let app = app_router(config, None, None, 100, None);
+        let app = app_router(config, None, None, 100, None, None);
 
         // Create a request body larger than 100 bytes
         let large_body = "x".repeat(200);
@@ -1218,7 +1251,7 @@ mod tests {
     async fn test_request_size_limit_allows_small() {
         let config = test_config_with_url("http://localhost:0");
         // 10MB limit
-        let app = app_router(config, None, None, 10 * 1024 * 1024, None);
+        let app = app_router(config, None, None, 10 * 1024 * 1024, None, None);
 
         let small_body = r#"{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}],"provider":"nonexistent"}"#;
         let response = tower::ServiceExt::oneshot(
@@ -1241,7 +1274,7 @@ mod tests {
     async fn test_no_size_limit_when_zero() {
         let config = test_config_with_url("http://localhost:0");
         // 0 = no limit
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let large_body = "x".repeat(1000);
         let response = tower::ServiceExt::oneshot(
@@ -1265,7 +1298,7 @@ mod tests {
     async fn test_auth_rejects_no_api_key() {
         let config = test_config_with_url("http://localhost:0");
         let auth_state = AuthState::new(vec!["valid-key".to_string()]);
-        let app = app_router(config, None, None, 0, Some(auth_state));
+        let app = app_router(config, None, None, 0, Some(auth_state), None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1293,7 +1326,7 @@ mod tests {
     async fn test_auth_rejects_invalid_api_key() {
         let config = test_config_with_url("http://localhost:0");
         let auth_state = AuthState::new(vec!["valid-key".to_string()]);
-        let app = app_router(config, None, None, 0, Some(auth_state));
+        let app = app_router(config, None, None, 0, Some(auth_state), None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1335,7 +1368,7 @@ mod tests {
 
         let config = test_config_with_url(&mock_server.uri());
         let auth_state = AuthState::new(vec!["valid-key".to_string()]);
-        let app = app_router(config, None, None, 0, Some(auth_state));
+        let app = app_router(config, None, None, 0, Some(auth_state), None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1364,7 +1397,7 @@ mod tests {
     async fn test_auth_health_endpoint_always_accessible() {
         let config = test_config_with_url("http://localhost:0");
         let auth_state = AuthState::new(vec!["valid-key".to_string()]);
-        let app = app_router(config, None, None, 0, Some(auth_state));
+        let app = app_router(config, None, None, 0, Some(auth_state), None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1383,7 +1416,7 @@ mod tests {
     #[tokio::test]
     async fn test_auth_disabled_allows_all() {
         let config = test_config_with_url("http://localhost:0");
-        let app = app_router(config, None, None, 0, None);
+        let app = app_router(config, None, None, 0, None, None);
 
         let response = tower::ServiceExt::oneshot(
             app,
@@ -1420,7 +1453,7 @@ mod tests {
             "key-2".to_string(),
             "key-3".to_string(),
         ]);
-        let app = app_router(config, None, None, 0, Some(auth_state));
+        let app = app_router(config, None, None, 0, Some(auth_state), None);
 
         // Try with second key
         let response = tower::ServiceExt::oneshot(

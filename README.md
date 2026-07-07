@@ -519,6 +519,7 @@ For production, implement the `AuditLogger` trait to send events to your logging
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check — returns `{"status":"ok"}` |
+| `GET` | `/metrics` | Prometheus metrics endpoint |
 | `GET` | `/v1/models` | List available models (OpenAI-compatible) |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions |
 | `POST` | `/v1/chat/completions/stream` | SSE streaming chat completions |
@@ -579,6 +580,7 @@ Test coverage includes:
 - [x] Request size limits
 - [x] Graceful shutdown (SIGTERM/SIGINT handling, in-flight requests complete)
 - [x] Structured logging with `tracing` (log levels, request tracing, env-filter)
+- [x] Metrics & observability with Prometheus exporter (request count, latency, PII detection rates)
 - [x] Confidence scoring for detections (High/Medium/Low)
 - [x] Structured audit logging for GDPR/HIPAA compliance
 - [x] Integration test suite (86 tests across 5 test files)

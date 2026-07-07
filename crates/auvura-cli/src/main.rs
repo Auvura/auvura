@@ -95,7 +95,7 @@ fn build_detectors(config: &Config) -> Vec<Box<dyn PiiDetector>> {
         _ => Box::new(PhoneNumberDetector::new()),
     };
 
-    vec![
+    let mut detectors: Vec<Box<dyn PiiDetector>> = vec![
         Box::new(EmailDetector::new()),
         phone_detector,
         Box::new(SSNDetector::new()),
@@ -106,7 +106,19 @@ fn build_detectors(config: &Config) -> Vec<Box<dyn PiiDetector>> {
         Box::new(PassportDetector::new()),
         Box::new(NationalIdDetector::new()),
         Box::new(AddressDetector::new()),
-    ]
+    ];
+
+    // Add custom regex detectors
+    if !config.policy.custom_patterns.is_empty() {
+        let (custom_detectors, errors) =
+            auvura_core::detectors::custom_regex::build_custom_detectors(&config.policy.custom_patterns);
+        for error in errors {
+            eprintln!("Warning: {}", error);
+        }
+        detectors.extend(custom_detectors);
+    }
+
+    detectors
 }
 
 fn build_redactor(

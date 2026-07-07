@@ -1,5 +1,6 @@
 pub mod address;
 pub mod credit_card;
+pub mod custom_regex;
 pub mod email;
 pub mod iban;
 pub mod ip;

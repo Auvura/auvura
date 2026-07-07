@@ -124,6 +124,10 @@ pub struct PolicyConfig {
     /// Allowlist terms that should never be redacted
     #[serde(default)]
     pub allowlist: Vec<String>,
+
+    /// Custom regex patterns for organization-specific PII
+    #[serde(default)]
+    pub custom_patterns: Vec<auvura_core::detectors::custom_regex::CustomRegexConfig>,
 }
 
 /// CORS configuration for browser-based SDK integrations.
@@ -435,6 +439,7 @@ impl Config {
             detectors::{
                 address::AddressDetector,
                 credit_card::CreditCardDetector,
+                custom_regex::build_custom_detectors,
                 email::EmailDetector,
                 iban::IbanDetector,
                 ip::{Ipv4Detector, Ipv6Detector},
@@ -456,7 +461,7 @@ impl Config {
                 _ => Box::new(PhoneNumberDetector::new()),
             };
 
-        let detectors: Vec<Box<dyn auvura_core::detector::PiiDetector>> = vec![
+        let mut detectors: Vec<Box<dyn auvura_core::detector::PiiDetector>> = vec![
             Box::new(EmailDetector::new()),
             phone_detector,
             Box::new(SSNDetector::new()),
@@ -468,6 +473,15 @@ impl Config {
             Box::new(NationalIdDetector::new()),
             Box::new(AddressDetector::new()),
         ];
+
+        // Add custom regex detectors
+        if !self.policy.custom_patterns.is_empty() {
+            let (custom_detectors, errors) = build_custom_detectors(&self.policy.custom_patterns);
+            for error in errors {
+                eprintln!("Warning: {}", error);
+            }
+            detectors.extend(custom_detectors);
+        }
 
         let mut builder = PolicyBuilder::default();
 
@@ -504,7 +518,15 @@ impl Config {
                     "address" | "physical_address" => {
                         builder = builder.enable(PiiType::PhysicalAddress)
                     }
-                    _ => eprintln!("Warning: unknown PII type '{}', skipping", type_name),
+                    // Custom types are always enabled (they're added as detectors)
+                    _ => {
+                        // Check if it matches a custom pattern name
+                        if self.policy.custom_patterns.iter().any(|p| p.name == *type_name) {
+                            // Custom types are always enabled
+                        } else {
+                            eprintln!("Warning: unknown PII type '{}', skipping", type_name);
+                        }
+                    }
                 }
             }
         }

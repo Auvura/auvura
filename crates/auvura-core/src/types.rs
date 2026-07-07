@@ -5,7 +5,7 @@
 /// - Excludes contextual PII (names/addresses) requiring NER
 /// - No heap allocations in enum (all variants are `Copy`)
 /// - Regulatory basis documented for compliance auditing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Eq)]
 pub enum PiiType {
     Email,
     PhoneNumber,
@@ -23,6 +23,34 @@ pub enum PiiType {
     PhysicalAddress,
     /// For NER-detected entities (names, organizations, locations)
     Other(&'static str), // Label like "PERSON", "ORG", "LOC"
+}
+
+impl PartialEq for PiiType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Email, Self::Email) => true,
+            (Self::PhoneNumber, Self::PhoneNumber) => true,
+            (Self::Ssn, Self::Ssn) => true,
+            (Self::CreditCard, Self::CreditCard) => true,
+            (Self::IpAddressV4, Self::IpAddressV4) => true,
+            (Self::IpAddressV6, Self::IpAddressV6) => true,
+            (Self::Iban, Self::Iban) => true,
+            (Self::PassportNumber, Self::PassportNumber) => true,
+            (Self::NationalId, Self::NationalId) => true,
+            (Self::PhysicalAddress, Self::PhysicalAddress) => true,
+            (Self::Other(a), Self::Other(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl std::hash::Hash for PiiType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        if let Self::Other(s) = self {
+            s.hash(state);
+        }
+    }
 }
 
 /// Serializable representation of `PiiType`.

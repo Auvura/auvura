@@ -404,6 +404,40 @@ Valid config keys: `email`, `phone`/`phone_number`, `ssn`, `credit_card`, `ipv4`
 
 When `enabled_types` is omitted or empty, all types are enabled by default.
 
+### Custom Regex Patterns
+
+Define organization-specific PII patterns (employee IDs, case numbers, etc.) without writing Rust code:
+
+```toml
+[policy]
+# Custom patterns for organization-specific identifiers
+[[policy.custom_patterns]]
+name = "employee_id"
+pattern = "EMP\\d{6}"
+placeholder = "[EMP_ID]"
+confidence = "high"
+
+[[policy.custom_patterns]]
+name = "case_number"
+pattern = "CASE-\\d{4}-\\d{4}"
+placeholder = "[CASE]"
+confidence = "medium"
+flags = "i"  # Case-insensitive matching
+
+[[policy.custom_patterns]]
+name = "project_code"
+pattern = "PRJ-[A-Z]{3}-\\d{3}"
+placeholder = "[PROJECT]"
+confidence = "low"
+```
+
+Each custom pattern supports:
+- `name`: Identifier for the pattern (used in logs and metrics)
+- `pattern`: Rust regex syntax
+- `placeholder`: Redaction replacement text (default: `[REDACTED]`)
+- `confidence`: `high`, `medium`, or `low` (default: `medium`)
+- `flags`: Optional regex flags (e.g., `i` for case-insensitive)
+
 ### CORS Configuration
 
 CORS support is available for browser-based SDK integrations. It is **disabled by default** — when no `[cors]` section is present, no `Access-Control-*` headers are sent.
@@ -581,6 +615,7 @@ Test coverage includes:
 - [x] Graceful shutdown (SIGTERM/SIGINT handling, in-flight requests complete)
 - [x] Structured logging with `tracing` (log levels, request tracing, env-filter)
 - [x] Metrics & observability with Prometheus exporter (request count, latency, PII detection rates)
+- [x] Custom regex detector plugin via TOML (user-defined patterns without writing Rust)
 - [x] Confidence scoring for detections (High/Medium/Low)
 - [x] Structured audit logging for GDPR/HIPAA compliance
 - [x] Integration test suite (86 tests across 5 test files)

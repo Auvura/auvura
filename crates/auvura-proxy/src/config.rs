@@ -125,6 +125,10 @@ pub struct PolicyConfig {
     #[serde(default)]
     pub allowlist: Vec<String>,
 
+    /// Global redaction mode: "mask", "replace", "hash", or "tokenize"
+    #[serde(default)]
+    pub mode: Option<String>,
+
     /// Custom regex patterns for organization-specific PII
     #[serde(default)]
     pub custom_patterns: Vec<auvura_core::detectors::custom_regex::CustomRegexConfig>,
@@ -539,6 +543,22 @@ impl Config {
         if !self.policy.allowlist.is_empty() {
             let refs: Vec<&str> = self.policy.allowlist.iter().map(String::as_str).collect();
             builder = builder.with_allowlist(refs);
+        }
+
+        // Apply redaction mode if specified
+        if let Some(mode_str) = &self.policy.mode {
+            use auvura_core::policy::RedactionMode;
+            let mode = match mode_str.as_str() {
+                "replace" => RedactionMode::Replace,
+                "hash" => RedactionMode::Hash,
+                "tokenize" => RedactionMode::Tokenize,
+                "mask" | "" => RedactionMode::Mask,
+                _ => {
+                    eprintln!("Warning: unknown redaction mode '{}', using default", mode_str);
+                    RedactionMode::Mask
+                }
+            };
+            builder = builder.with_mode(mode);
         }
 
         if let Some(audit_logger) = audit_logger {

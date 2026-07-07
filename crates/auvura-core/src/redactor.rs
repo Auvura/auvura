@@ -1,7 +1,7 @@
 use crate::{
     audit::{AuditEvent, AuditLogger, NoopAuditLogger},
     detector::{Detection, MultiDetector, PiiDetector},
-    policy::RedactionPolicy,
+    policy::{RedactionMode, RedactionPolicy},
     types::PiiType,
 };
 use std::borrow::Cow;
@@ -139,6 +139,7 @@ impl Redactor {
         // Step 6: Apply all redactions in one pass over the original text
         let mut result = String::with_capacity(text.len());
         let mut last_idx = 0;
+        let mut pii_counter: usize = 0;
 
         // Merge PII detections and blocklist spans into sorted list
         let mut all_spans: Vec<(usize, usize, RedactionKind<'_>)> = Vec::new();
@@ -159,7 +160,14 @@ impl Redactor {
 
             match kind {
                 RedactionKind::Pii(detection) => {
-                    let redacted = self.redact_structured(&detection.original, detection.pii_type);
+                    let redacted = if self.policy.mode() == RedactionMode::Tokenize {
+                        // Tokenize mode: replace with sequential tokens
+                        let token = format!("[[PII_{}]]", pii_counter);
+                        pii_counter += 1;
+                        token
+                    } else {
+                        self.redact_structured(&detection.original, detection.pii_type)
+                    };
                     self.audit_logger
                         .log(AuditEvent::from_detection(detection, &redacted));
                     result.push_str(&redacted);
@@ -206,18 +214,38 @@ impl Redactor {
             return custom.to_string();
         }
 
-        // Default: format-preserving structured redaction
-        match pii_type {
-            PiiType::Email => self.redact_email_structured(original),
-            PiiType::PhoneNumber => self.redact_phone_structured(original),
-            PiiType::Ssn => self.redact_ssn_structured(original),
-            PiiType::CreditCard => self.redact_credit_card_structured(original),
-            PiiType::IpAddressV4 | PiiType::IpAddressV6 => "█".repeat(original.len()),
-            PiiType::Iban => self.redact_iban_structured(original),
-            PiiType::PassportNumber => self.redact_passport_structured(original),
-            PiiType::NationalId => self.redact_national_id_structured(original),
-            PiiType::PhysicalAddress => "█".repeat(original.len()),
-            PiiType::Other(_) => "█".repeat(original.len()),
+        // Apply global redaction mode
+        match self.policy.mode() {
+            RedactionMode::Mask => {
+                // Default: format-preserving structured redaction
+                match pii_type {
+                    PiiType::Email => self.redact_email_structured(original),
+                    PiiType::PhoneNumber => self.redact_phone_structured(original),
+                    PiiType::Ssn => self.redact_ssn_structured(original),
+                    PiiType::CreditCard => self.redact_credit_card_structured(original),
+                    PiiType::IpAddressV4 | PiiType::IpAddressV6 => "█".repeat(original.len()),
+                    PiiType::Iban => self.redact_iban_structured(original),
+                    PiiType::PassportNumber => self.redact_passport_structured(original),
+                    PiiType::NationalId => self.redact_national_id_structured(original),
+                    PiiType::PhysicalAddress => "█".repeat(original.len()),
+                    PiiType::Other(_) => "█".repeat(original.len()),
+                }
+            }
+            RedactionMode::Replace => {
+                // Full replacement with type-specific placeholder
+                pii_type.placeholder().to_string()
+            }
+            RedactionMode::Hash => {
+                // Blake3 hash (first 16 hex chars for readability)
+                let hash = blake3::hash(original.as_bytes());
+                let hex = hash.to_hex();
+                format!("[HASH:{}]", &hex[..16])
+            }
+            RedactionMode::Tokenize => {
+                // Tokenize with sequential numbers - handled at redact() level
+                // This fallback should not be reached
+                format!("[PII:{}]", original.len())
+            }
         }
     }
 
@@ -802,5 +830,85 @@ mod tests {
         // "TOP" and "SECRET" as standalone words are redacted
         // "TOPSECRET" is one word — no match
         assert_eq!(result, "███ ██████ info: TOPSECRET is not matched");
+    }
+
+    #[test]
+    fn test_redaction_mode_replace() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_mode(crate::policy::RedactionMode::Replace)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Contact john@example.com";
+        let result = redactor.redact(input);
+        // Replace mode uses the default placeholder for the type
+        assert_eq!(result, "Contact [REDACTED_EMAIL]");
+    }
+
+    #[test]
+    fn test_redaction_mode_hash() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_mode(crate::policy::RedactionMode::Hash)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Contact john@example.com";
+        let result = redactor.redact(input);
+        // Hash mode produces a deterministic Blake3 hash
+        assert!(result.starts_with("Contact [HASH:"));
+        assert!(result.ends_with("]"));
+        // Same input produces same hash
+        let result2 = redactor.redact(input);
+        assert_eq!(result, result2);
+    }
+
+    #[test]
+    fn test_redaction_mode_tokenize() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_mode(crate::policy::RedactionMode::Tokenize)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Email alice@example.com and bob@test.org";
+        let result = redactor.redact(input);
+        // Tokenize mode replaces with sequential tokens
+        assert!(result.contains("[[PII_0]]"));
+        assert!(result.contains("[[PII_1]]"));
+        assert!(!result.contains("alice@example.com"));
+        assert!(!result.contains("bob@test.org"));
+    }
+
+    #[test]
+    fn test_redaction_mode_tokenize_sequential() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_mode(crate::policy::RedactionMode::Tokenize)
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "a@b.com c@d.com e@f.com";
+        let result = redactor.redact(input);
+        // Tokens should be sequential
+        assert!(result.contains("[[PII_0]]"));
+        assert!(result.contains("[[PII_1]]"));
+        assert!(result.contains("[[PII_2]]"));
+    }
+
+    #[test]
+    fn test_redaction_mode_replace_with_custom_placeholder() {
+        let detector = SimpleEmailDetector;
+        let policy = RedactionPolicy::builder()
+            .with_mode(crate::policy::RedactionMode::Replace)
+            .with_placeholder(PiiType::Email, "[MAIL]")
+            .build();
+        let redactor = Redactor::new(vec![Box::new(detector)], policy);
+
+        let input = "Contact john@example.com";
+        let result = redactor.redact(input);
+        // Custom placeholder overrides the default
+        assert_eq!(result, "Contact [MAIL]");
     }
 }

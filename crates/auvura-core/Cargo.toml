@@ -15,6 +15,7 @@ phonelib = { workspace = true }
 futures-core = { workspace = true }
 pin-project-lite = { workspace = true }
 zeroize = "1.8.2"
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -1,6 +1,39 @@
 use crate::types::{PiiType, PiiTypeConfig};
 use std::collections::{HashMap, HashSet};
 
+/// Redaction mode – determines HOW PII is transformed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionMode {
+    /// Format-preserving mask (default): replaces digits with `█` while
+    /// keeping structure like `███-██-████` for SSNs
+    #[default]
+    Mask,
+    /// Full replacement: replaces entire match with a placeholder string
+    Replace,
+    /// Hash: replaces with Blake3 hash of the original value (hex-encoded, first 16 chars)
+    Hash,
+    /// Tokenize: replaces with sequential tokens `[[PII_0]]`, `[[PII_1]]`, etc.
+    Tokenize,
+}
+
+impl RedactionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mask => "mask",
+            Self::Replace => "replace",
+            Self::Hash => "hash",
+            Self::Tokenize => "tokenize",
+        }
+    }
+}
+
+impl std::fmt::Display for RedactionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Redaction policy – defines WHAT to redact and HOW to redact it
 #[derive(Debug, Clone)]
 pub struct RedactionPolicy {
@@ -9,6 +42,9 @@ pub struct RedactionPolicy {
 
     /// Custom placeholder per PII type (overrides defaults)
     placeholder_map: HashMap<PiiType, String>,
+
+    /// Global redaction mode (default: Mask)
+    mode: RedactionMode,
 
     /// Allowlist: terms NEVER redacted (e.g., "Apple", "Paris")
     allowlist: Vec<String>,
@@ -34,6 +70,10 @@ pub struct RedactionPolicyConfig {
     /// Custom placeholder per PII type
     #[serde(default)]
     pub placeholders: HashMap<PiiTypeConfig, String>,
+
+    /// Global redaction mode (default: mask)
+    #[serde(default)]
+    pub mode: RedactionMode,
 
     /// Terms that should never be redacted
     #[serde(default)]
@@ -69,6 +109,7 @@ impl Default for RedactionPolicy {
         Self {
             enabled_types: enabled,
             placeholder_map: HashMap::new(),
+            mode: RedactionMode::default(),
             allowlist: Vec::new(),
             blocklist: Vec::new(),
             strict_validation: true, // Fail-safe default
@@ -82,6 +123,11 @@ impl RedactionPolicy {
         PolicyBuilder::default()
     }
 
+    /// Get the global redaction mode
+    pub fn mode(&self) -> RedactionMode {
+        self.mode
+    }
+
     /// Serialize this policy to a `RedactionPolicyConfig`.
     pub fn serialize(&self) -> RedactionPolicyConfig {
         RedactionPolicyConfig {
@@ -91,6 +137,7 @@ impl RedactionPolicy {
                 .iter()
                 .map(|(k, v)| ((*k).into(), v.clone()))
                 .collect(),
+            mode: self.mode,
             allowlist: self.allowlist.clone(),
             blocklist: self.blocklist.clone(),
             strict_validation: self.strict_validation,
@@ -117,6 +164,7 @@ impl RedactionPolicy {
         Self {
             enabled_types,
             placeholder_map,
+            mode: config.mode,
             allowlist: config.allowlist.clone(),
             blocklist: config.blocklist.clone(),
             strict_validation: config.strict_validation,
@@ -188,6 +236,11 @@ impl PolicyBuilder {
         self.policy
             .placeholder_map
             .insert(pii_type, placeholder.to_string());
+        self
+    }
+
+    pub fn with_mode(mut self, mode: RedactionMode) -> Self {
+        self.policy.mode = mode;
         self
     }
 
@@ -421,5 +474,49 @@ mod tests {
         // "PERSON" Other type is skipped, only Email remains
         assert!(policy.is_enabled(PiiType::Email));
         assert!(!policy.is_enabled(PiiType::Ssn));
+    }
+
+    #[test]
+    fn test_redaction_mode_default_is_mask() {
+        let policy = RedactionPolicy::default();
+        assert_eq!(policy.mode(), RedactionMode::Mask);
+    }
+
+    #[test]
+    fn test_redaction_mode_builder() {
+        let policy = PolicyBuilder::default()
+            .with_mode(RedactionMode::Hash)
+            .build();
+        assert_eq!(policy.mode(), RedactionMode::Hash);
+    }
+
+    #[test]
+    fn test_redaction_mode_round_trip() {
+        let policy = PolicyBuilder::default()
+            .with_mode(RedactionMode::Tokenize)
+            .build();
+        let config = policy.serialize();
+        assert_eq!(config.mode, RedactionMode::Tokenize);
+        
+        let restored = RedactionPolicy::from_config(&config);
+        assert_eq!(restored.mode(), RedactionMode::Tokenize);
+    }
+
+    #[test]
+    fn test_redaction_mode_serde() {
+        let modes = vec![
+            (RedactionMode::Mask, "\"mask\""),
+            (RedactionMode::Replace, "\"replace\""),
+            (RedactionMode::Hash, "\"hash\""),
+            (RedactionMode::Tokenize, "\"tokenize\""),
+        ];
+        
+        for (mode, expected_json) in modes {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, expected_json);
+            
+            let parsed: RedactionMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, mode);
+        }
     }
 }

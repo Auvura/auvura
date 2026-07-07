@@ -317,10 +317,13 @@ mod tests {
 
         assert_eq!(logger.len(), 1);
         let events = logger.events();
-        assert_eq!(events[0].event, AuditEvent::Custom {
-            category: "test".to_string(),
-            message: "hello".to_string(),
-        });
+        assert_eq!(
+            events[0].event,
+            AuditEvent::Custom {
+                category: "test".to_string(),
+                message: "hello".to_string(),
+            }
+        );
         assert!(!events[0].timestamp.is_empty());
     }
 

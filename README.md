@@ -404,6 +404,26 @@ Valid config keys: `email`, `phone`/`phone_number`, `ssn`, `credit_card`, `ipv4`
 
 When `enabled_types` is omitted or empty, all types are enabled by default.
 
+### Redaction Modes
+
+Configure how PII is transformed globally in `auvura.toml`:
+
+```toml
+[policy]
+mode = "mask"  # Default: format-preserving mask
+```
+
+Available modes:
+
+| Mode | Description | Example |
+|------|-------------|---------|
+| `mask` | Format-preserving mask (default) | `123-45-6789` → `███-██-████` |
+| `replace` | Full replacement with placeholder | `123-45-6789` → `[REDACTED_SSN]` |
+| `hash` | Blake3 hash (deterministic, first 16 hex chars) | `123-45-6789` → `[HASH:a1b2c3d4e5f67890]` |
+| `tokenize` | Sequential tokens for reconstruction | `123-45-6789` → `[[PII_0]]` |
+
+Hash mode is useful for analytics (same input → same output). Tokenize mode enables reconstruction when tokens are stored separately.
+
 ### Custom Regex Patterns
 
 Define organization-specific PII patterns (employee IDs, case numbers, etc.) without writing Rust code:
@@ -598,6 +618,7 @@ Test coverage includes:
 - [x] Physical address detector (street, city, state, ZIP)
 - [x] Compliance policy profiles (GDPR, HIPAA, PCI-DSS)
 - [x] Structured redaction engine
+- [x] Configurable redaction modes (mask, replace, hash, tokenize)
 - [x] Provider-agnostic proxy with OpenAI-compatible API
 - [x] SSE streaming endpoint with real-time PII reconstruction
 - [x] NER module (`SimpleNameDetector`, `TokenRedactor`)

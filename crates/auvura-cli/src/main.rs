@@ -111,7 +111,9 @@ fn build_detectors(config: &Config) -> Vec<Box<dyn PiiDetector>> {
     // Add custom regex detectors
     if !config.policy.custom_patterns.is_empty() {
         let (custom_detectors, errors) =
-            auvura_core::detectors::custom_regex::build_custom_detectors(&config.policy.custom_patterns);
+            auvura_core::detectors::custom_regex::build_custom_detectors(
+                &config.policy.custom_patterns,
+            );
         for error in errors {
             eprintln!("Warning: {}", error);
         }
@@ -391,7 +393,9 @@ async fn main() {
                 rate_limiter,
                 max_body_bytes,
                 auth_state,
-                Some(std::sync::Arc::new(auvura_proxy::metrics::MetricsState::new())),
+                Some(std::sync::Arc::new(
+                    auvura_proxy::metrics::MetricsState::new(),
+                )),
             );
 
             let addr: std::net::SocketAddr =

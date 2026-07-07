@@ -184,7 +184,7 @@ mod tests {
     fn test_custom_regex_invalid_pattern() {
         let config = CustomRegexConfig {
             name: "invalid".to_string(),
-            pattern: r"[invalid".to_string(),  // Missing closing bracket
+            pattern: r"[invalid".to_string(), // Missing closing bracket
             placeholder: "[REDacted]".to_string(),
             confidence: "medium".to_string(),
             flags: None,
@@ -247,7 +247,7 @@ mod tests {
         };
 
         let detector = CustomRegexDetector::from_config(&config).unwrap();
-        
+
         // First, verify detection works
         let detections = detector.detect("SSN: 123-45-6789");
         assert_eq!(detections.len(), 1);

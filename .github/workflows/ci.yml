@@ -1,0 +1,20 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE*'
+      - '.gitignore'
+  pull_request:
+    branches: [main, dev]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE*'
+      - '.gitignore'
+
+jobs:
+  ci:
+    uses: riccione/github-workflows/.github/workflows/rust-ci.yml@v3

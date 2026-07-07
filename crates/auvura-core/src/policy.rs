@@ -2,7 +2,9 @@ use crate::types::{PiiType, PiiTypeConfig};
 use std::collections::{HashMap, HashSet};
 
 /// Redaction mode – determines HOW PII is transformed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionMode {
     /// Format-preserving mask (default): replaces digits with `█` while
@@ -497,7 +499,7 @@ mod tests {
             .build();
         let config = policy.serialize();
         assert_eq!(config.mode, RedactionMode::Tokenize);
-        
+
         let restored = RedactionPolicy::from_config(&config);
         assert_eq!(restored.mode(), RedactionMode::Tokenize);
     }
@@ -510,11 +512,11 @@ mod tests {
             (RedactionMode::Hash, "\"hash\""),
             (RedactionMode::Tokenize, "\"tokenize\""),
         ];
-        
+
         for (mode, expected_json) in modes {
             let json = serde_json::to_string(&mode).unwrap();
             assert_eq!(json, expected_json);
-            
+
             let parsed: RedactionMode = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, mode);
         }

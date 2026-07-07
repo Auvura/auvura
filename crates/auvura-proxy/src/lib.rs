@@ -195,7 +195,11 @@ async fn request_tracing_middleware(
             metrics::MetricsState::record_request(&method, &path, status, duration_secs);
         }
 
-        info!(status = status, duration_secs = duration_secs, "Request completed");
+        info!(
+            status = status,
+            duration_secs = duration_secs,
+            "Request completed"
+        );
         response
     }
     .instrument(span)
@@ -356,8 +360,7 @@ pub async fn chat_completions(
                                     {
                                         let mut reconstructed = content.to_string();
                                         for (token, original) in &token_map {
-                                            reconstructed =
-                                                reconstructed.replace(token, original);
+                                            reconstructed = reconstructed.replace(token, original);
                                         }
                                         message["content"] = Value::String(reconstructed);
                                     }
@@ -966,8 +969,16 @@ mod tests {
 
         // The token [[PII_0]] should be replaced with the original email
         let content = json["choices"][0]["message"]["content"].as_str().unwrap();
-        assert!(content.contains("john@example.com"), "Token should be replaced with original email, got: {}", content);
-        assert!(!content.contains("[[PII_0]]"), "Token marker should not remain in output, got: {}", content);
+        assert!(
+            content.contains("john@example.com"),
+            "Token should be replaced with original email, got: {}",
+            content
+        );
+        assert!(
+            !content.contains("[[PII_0]]"),
+            "Token marker should not remain in output, got: {}",
+            content
+        );
     }
 
     #[tokio::test]

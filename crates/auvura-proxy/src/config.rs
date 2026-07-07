@@ -525,7 +525,12 @@ impl Config {
                     // Custom types are always enabled (they're added as detectors)
                     _ => {
                         // Check if it matches a custom pattern name
-                        if self.policy.custom_patterns.iter().any(|p| p.name == *type_name) {
+                        if self
+                            .policy
+                            .custom_patterns
+                            .iter()
+                            .any(|p| p.name == *type_name)
+                        {
                             // Custom types are always enabled
                         } else {
                             eprintln!("Warning: unknown PII type '{}', skipping", type_name);
@@ -554,7 +559,10 @@ impl Config {
                 "tokenize" => RedactionMode::Tokenize,
                 "mask" | "" => RedactionMode::Mask,
                 _ => {
-                    eprintln!("Warning: unknown redaction mode '{}', using default", mode_str);
+                    eprintln!(
+                        "Warning: unknown redaction mode '{}', using default",
+                        mode_str
+                    );
                     RedactionMode::Mask
                 }
             };

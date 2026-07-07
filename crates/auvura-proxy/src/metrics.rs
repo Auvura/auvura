@@ -2,17 +2,8 @@
 //!
 //! Provides request count, latency histograms, and PII detection rates.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use metrics::{
-    describe_counter, describe_histogram, counter, histogram,
-    Unit,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
+use metrics::{counter, describe_counter, describe_histogram, histogram, Unit};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::sync::Arc;
 use std::time::Instant;

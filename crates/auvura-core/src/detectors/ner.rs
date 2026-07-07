@@ -125,7 +125,7 @@ impl TokenRedactor {
         let mut result = text.to_string();
 
         let mut sorted = detections.to_vec();
-        sorted.sort_by(|a, b| b.start.cmp(&a.start));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.start));
 
         for detection in sorted {
             let token = self.get_or_create_token(&detection.original, &detection.pii_type);
